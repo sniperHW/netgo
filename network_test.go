@@ -3,14 +3,78 @@ package network
 //go test -race -covermode=atomic -v -coverprofile=coverage.out -run=.
 //go tool cover -html=coverage.out
 import (
+	"crypto/sha1"
 	"fmt"
 	gorilla "github.com/gorilla/websocket"
+	"github.com/xtaci/kcp-go/v5"
+	"golang.org/x/crypto/pbkdf2"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
 )
+
+func TestKcpSocket(t *testing.T) {
+	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
+	block, _ := kcp.NewAESBlockCrypt(key)
+
+	var (
+		listener *kcp.Listener
+		err      error
+	)
+
+	if listener, err = kcp.ListenWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
+		go func() {
+			for {
+				conn, err := listener.AcceptKCP()
+				if err != nil {
+					return
+				}
+
+				fmt.Println("on new client")
+
+				s, _ := NewKcpSocket(conn)
+				go func() {
+					for {
+						packet, err := s.Recv()
+						if nil != err {
+							fmt.Println("server recv err:", err)
+							break
+						}
+						s.Send(packet)
+					}
+					s.Close()
+				}()
+			}
+		}()
+	} else {
+		log.Fatal(err)
+	}
+
+	{
+
+		key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
+		block, _ := kcp.NewAESBlockCrypt(key)
+		// dial to the echo server
+		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
+			s, _ := NewKcpSocket(conn)
+
+			s.Send([]byte("hello"))
+
+			packet, err := s.Recv()
+
+			fmt.Println("client", string(packet), err)
+
+			s.Close()
+		} else {
+			log.Fatal(err)
+		}
+	}
+
+	listener.Close()
+}
 
 func TestWebSocket(t *testing.T) {
 	{

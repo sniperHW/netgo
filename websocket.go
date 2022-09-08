@@ -10,35 +10,35 @@ import (
 	"time"
 )
 
-type WebSocket struct {
+type webSocket struct {
 	userData  atomic.Value
 	conn      *gorilla.Conn
 	closeOnce sync.Once
 }
 
-func (wc *WebSocket) SetSendDeadline(deadline time.Time) {
+func (wc *webSocket) SetSendDeadline(deadline time.Time) {
 	wc.conn.SetWriteDeadline(deadline)
 }
 
-func (wc *WebSocket) SetRecvDeadline(deadline time.Time) {
+func (wc *webSocket) SetRecvDeadline(deadline time.Time) {
 	wc.conn.SetReadDeadline(deadline)
 }
 
-func (wc *WebSocket) LocalAddr() net.Addr {
+func (wc *webSocket) LocalAddr() net.Addr {
 	return wc.conn.LocalAddr()
 }
 
-func (wc *WebSocket) RemoteAddr() net.Addr {
+func (wc *webSocket) RemoteAddr() net.Addr {
 	return wc.conn.RemoteAddr()
 }
 
-func (wc *WebSocket) SetUserData(ud interface{}) {
+func (wc *webSocket) SetUserData(ud interface{}) {
 	wc.userData.Store(userdata{
 		data: ud,
 	})
 }
 
-func (wc *WebSocket) GetUserData() interface{} {
+func (wc *webSocket) GetUserData() interface{} {
 	if ud := wc.userData.Load(); nil == ud {
 		return nil
 	} else {
@@ -46,11 +46,11 @@ func (wc *WebSocket) GetUserData() interface{} {
 	}
 }
 
-func (wc *WebSocket) GetUnderConn() interface{} {
+func (wc *webSocket) GetUnderConn() interface{} {
 	return wc.conn
 }
 
-func (wc *WebSocket) Close() {
+func (wc *webSocket) Close() {
 	wc.closeOnce.Do(func() {
 		runtime.SetFinalizer(wc, nil)
 		wc.conn.SetWriteDeadline(time.Now().Add(time.Second))
@@ -59,7 +59,7 @@ func (wc *WebSocket) Close() {
 	})
 }
 
-func (wc *WebSocket) Send(data []byte) (int, error) {
+func (wc *webSocket) Send(data []byte) (int, error) {
 	err := wc.conn.WriteMessage(gorilla.BinaryMessage, data)
 	if nil == err {
 		return len(data), nil
@@ -68,7 +68,7 @@ func (wc *WebSocket) Send(data []byte) (int, error) {
 	}
 }
 
-func (wc *WebSocket) Recv() ([]byte, error) {
+func (wc *webSocket) Recv() ([]byte, error) {
 	_, packet, err := wc.conn.ReadMessage()
 	return packet, err
 }
@@ -78,11 +78,11 @@ func NewWebSocket(conn *gorilla.Conn) (Socket, error) {
 		return nil, errors.New("conn is nil")
 	}
 
-	s := &WebSocket{
+	s := &webSocket{
 		conn: conn,
 	}
 
-	runtime.SetFinalizer(s, func(s *WebSocket) {
+	runtime.SetFinalizer(s, func(s *webSocket) {
 		s.Close()
 	})
 

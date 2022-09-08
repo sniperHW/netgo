@@ -9,36 +9,36 @@ import (
 	"time"
 )
 
-type TcpSocket struct {
+type tcpSocket struct {
 	userData       atomic.Value
 	packetReceiver PacketReceiver
 	conn           net.Conn
 	closeOnce      sync.Once
 }
 
-func (tc *TcpSocket) SetSendDeadline(deadline time.Time) {
+func (tc *tcpSocket) SetSendDeadline(deadline time.Time) {
 	tc.conn.SetWriteDeadline(deadline)
 }
 
-func (tc *TcpSocket) SetRecvDeadline(deadline time.Time) {
+func (tc *tcpSocket) SetRecvDeadline(deadline time.Time) {
 	tc.conn.SetReadDeadline(deadline)
 }
 
-func (tc *TcpSocket) LocalAddr() net.Addr {
+func (tc *tcpSocket) LocalAddr() net.Addr {
 	return tc.conn.LocalAddr()
 }
 
-func (tc *TcpSocket) RemoteAddr() net.Addr {
+func (tc *tcpSocket) RemoteAddr() net.Addr {
 	return tc.conn.RemoteAddr()
 }
 
-func (tc *TcpSocket) SetUserData(ud interface{}) {
+func (tc *tcpSocket) SetUserData(ud interface{}) {
 	tc.userData.Store(userdata{
 		data: ud,
 	})
 }
 
-func (tc *TcpSocket) GetUserData() interface{} {
+func (tc *tcpSocket) GetUserData() interface{} {
 	if ud := tc.userData.Load(); nil == ud {
 		return nil
 	} else {
@@ -46,22 +46,22 @@ func (tc *TcpSocket) GetUserData() interface{} {
 	}
 }
 
-func (tc *TcpSocket) GetUnderConn() interface{} {
+func (tc *tcpSocket) GetUnderConn() interface{} {
 	return tc.conn
 }
 
-func (tc *TcpSocket) Close() {
+func (tc *tcpSocket) Close() {
 	tc.closeOnce.Do(func() {
 		runtime.SetFinalizer(tc, nil)
 		tc.conn.Close()
 	})
 }
 
-func (tc *TcpSocket) Send(data []byte) (int, error) {
+func (tc *tcpSocket) Send(data []byte) (int, error) {
 	return tc.conn.Write(data)
 }
 
-func (tc *TcpSocket) Recv() ([]byte, error) {
+func (tc *tcpSocket) Recv() ([]byte, error) {
 	return tc.packetReceiver.Recv(tc.conn)
 }
 
@@ -76,7 +76,7 @@ func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, erro
 		return nil, errors.New("conn should be TCPConn")
 	}
 
-	s := &TcpSocket{
+	s := &tcpSocket{
 		conn: conn,
 	}
 
@@ -88,7 +88,7 @@ func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, erro
 		s.packetReceiver = packetReceiver[0]
 	}
 
-	runtime.SetFinalizer(s, func(s *TcpSocket) {
+	runtime.SetFinalizer(s, func(s *tcpSocket) {
 		s.Close()
 	})
 
