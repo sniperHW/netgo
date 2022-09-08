@@ -24,20 +24,17 @@ type PacketReceiver interface {
 	Recv(ReadAble) ([]byte, error)
 }
 
-type SocketOption struct {
-	UserData      interface{}
-	CloseCallBack func(error)
-}
-
 type Socket interface {
-	SendWithDeadline([]byte, time.Time) (int, error)
 	Send([]byte) (int, error)
+	Recv() ([]byte, error)
 	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
 	SetUserData(ud interface{})
 	GetUserData() interface{}
 	GetUnderConn() interface{}
-	Close(error)
+	Close()
+	SetSendDeadline(time.Time)
+	SetRecvDeadline(time.Time)
 }
 
 type userdata struct {

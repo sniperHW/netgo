@@ -9,21 +9,19 @@ import (
 	"time"
 )
 
-type TcpRecvOption struct {
-	RecvTimeout   time.Duration
-	Receiver      PacketReceiver
-	OnRecvTimeout func()
-	OnPacket      func([]byte)
+type TcpSocket struct {
+	userData       atomic.Value
+	packetReceiver PacketReceiver
+	conn           net.Conn
+	closeOnce      sync.Once
 }
 
-type TcpSocket struct {
-	mu            sync.Mutex
-	userData      atomic.Value
-	closeReason   atomic.Value
-	conn          net.Conn
-	closeCallBack func(error)
-	closed        int32
-	started       bool
+func (tc *TcpSocket) SetSendDeadline(deadline time.Time) {
+	tc.conn.SetWriteDeadline(deadline)
+}
+
+func (tc *TcpSocket) SetRecvDeadline(deadline time.Time) {
+	tc.conn.SetReadDeadline(deadline)
 }
 
 func (tc *TcpSocket) LocalAddr() net.Addr {
@@ -52,89 +50,22 @@ func (tc *TcpSocket) GetUnderConn() interface{} {
 	return tc.conn
 }
 
-func (tc *TcpSocket) getCloseReason() error {
-	r := tc.closeReason.Load()
-	if nil == r {
-		return nil
-	} else {
-		return r.(error)
-	}
-}
-
-func (tc *TcpSocket) Close(reason error) {
-	doCloseCallback := false
-	tc.mu.Lock()
-	if atomic.CompareAndSwapInt32(&tc.closed, 0, 1) {
+func (tc *TcpSocket) Close() {
+	tc.closeOnce.Do(func() {
 		runtime.SetFinalizer(tc, nil)
-		if nil != reason {
-			tc.closeReason.Store(reason)
-		}
 		tc.conn.Close()
-		if !tc.started {
-			doCloseCallback = true
-		}
-	}
-	tc.mu.Unlock()
-	if doCloseCallback {
-		tc.closeCallBack(reason)
-	}
-}
-
-func (tc *TcpSocket) recvloop(o TcpRecvOption) {
-	defer func() {
-		tc.closeCallBack(tc.getCloseReason())
-	}()
-	for atomic.LoadInt32(&tc.closed) == 0 {
-		if o.RecvTimeout > 0 {
-			tc.conn.SetReadDeadline(time.Now().Add(o.RecvTimeout))
-		}
-		packet, err := o.Receiver.Recv(tc.conn)
-		if nil != err && atomic.LoadInt32(&tc.closed) == 0 {
-			if IsNetTimeoutError(err) && nil != o.OnRecvTimeout {
-				o.OnRecvTimeout()
-			} else {
-				tc.Close(err)
-			}
-		} else if len(packet) > 0 {
-			o.OnPacket(packet)
-		}
-	}
-}
-
-func (tc *TcpSocket) SendWithDeadline(data []byte, deadline time.Time) (int, error) {
-	tc.conn.SetWriteDeadline(deadline)
-	n, err := tc.conn.Write(data)
-	tc.conn.SetWriteDeadline(time.Time{})
-	return n, err
+	})
 }
 
 func (tc *TcpSocket) Send(data []byte) (int, error) {
 	return tc.conn.Write(data)
 }
 
-func (tc *TcpSocket) StartRecv(o TcpRecvOption) error {
-	if nil == o.OnPacket {
-		return errors.New("OnPacket shouldn`t be nil")
-	}
-
-	if o.Receiver == nil {
-		o.Receiver = &defaultPacketReceiver{
-			recvbuf: make([]byte, 65535),
-		}
-	}
-
-	tc.mu.Lock()
-	defer tc.mu.Unlock()
-	if atomic.LoadInt32(&tc.closed) == 0 {
-		tc.started = true
-		go tc.recvloop(o)
-		return nil
-	} else {
-		return errors.New("socket closed")
-	}
+func (tc *TcpSocket) Recv() ([]byte, error) {
+	return tc.packetReceiver.Recv(tc.conn)
 }
 
-func NewTcpSocket(conn net.Conn, o SocketOption) (Socket, error) {
+func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, error) {
 	if nil == conn {
 		return nil, errors.New("conn is nil")
 	}
@@ -145,19 +76,20 @@ func NewTcpSocket(conn net.Conn, o SocketOption) (Socket, error) {
 		return nil, errors.New("conn should be TCPConn")
 	}
 
-	if o.CloseCallBack == nil {
-		o.CloseCallBack = func(error) {}
-	}
-
 	s := &TcpSocket{
-		conn:          conn,
-		closeCallBack: o.CloseCallBack,
+		conn: conn,
 	}
 
-	s.SetUserData(o.UserData)
+	if len(packetReceiver) == 0 || packetReceiver[0] == nil {
+		s.packetReceiver = &defaultPacketReceiver{
+			recvbuf: make([]byte, 65535),
+		}
+	} else {
+		s.packetReceiver = packetReceiver[0]
+	}
 
 	runtime.SetFinalizer(s, func(s *TcpSocket) {
-		s.Close(errors.New("gc"))
+		s.Close()
 	})
 
 	return s, nil
