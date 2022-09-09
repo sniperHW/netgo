@@ -167,6 +167,94 @@ func TestWebSocket(t *testing.T) {
 	}
 }
 
+func TestAsynSocket(t *testing.T) {
+	tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
+
+	listener, _ := net.ListenTCP("tcp", tcpAddr)
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			} else {
+				fmt.Println("on client")
+				s, _ := NewTcpSocket(conn)
+				as, _ := NewAsynSocket(s, AsynSocketOption{
+					CloseCallBack: func(_ *AsynSocket, err error) {
+						fmt.Println("server closed err:", err)
+					},
+					HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
+						if nil != err {
+							as.Close(err)
+						} else {
+							fmt.Println("server on packet", string(packet.([]byte)))
+							as.Send(packet, time.Time{})
+							as.Recv(time.Now().Add(time.Second))
+						}
+					},
+				})
+				as.Recv(time.Now().Add(time.Second))
+			}
+		}
+	}()
+
+	dialer := &net.Dialer{}
+
+	{
+		conn, _ := dialer.Dial("tcp", "localhost:8110")
+		s, _ := NewTcpSocket(conn)
+
+		okChan := make(chan struct{})
+
+		as, _ := NewAsynSocket(s, AsynSocketOption{
+			CloseCallBack: func(_ *AsynSocket, err error) {
+				fmt.Println("client closed err:", err)
+			},
+			HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
+				if nil != err {
+					as.Close(err)
+					close(okChan)
+				} else {
+					fmt.Println("client", string(packet.([]byte)))
+					close(okChan)
+				}
+			},
+		})
+
+		as.Send([]byte("hello"), time.Time{})
+		as.Recv(time.Time{})
+		<-okChan
+		as.Close(nil)
+	}
+
+	{
+		conn, _ := dialer.Dial("tcp", "localhost:8110")
+		s, _ := NewTcpSocket(conn)
+		okChan := make(chan struct{})
+		as, _ := NewAsynSocket(s, AsynSocketOption{
+			CloseCallBack: func(_ *AsynSocket, err error) {
+				fmt.Println("client closed err:", err)
+			},
+			HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
+				if nil != err {
+					as.Close(err)
+					close(okChan)
+				} else {
+					fmt.Println("client", string(packet.([]byte)))
+					close(okChan)
+				}
+			},
+		})
+		as.Recv(time.Time{})
+		<-okChan
+		as.Close(nil)
+	}
+
+	listener.Close()
+
+}
+
 func TestTCPSocket(t *testing.T) {
 
 	{
@@ -184,8 +272,7 @@ func TestTCPSocket(t *testing.T) {
 					s, _ := NewTcpSocket(conn)
 					go func() {
 						for {
-							s.SetRecvDeadline(time.Now().Add(time.Second))
-							packet, err := s.Recv()
+							packet, err := s.Recv(time.Now().Add(time.Second))
 							if nil != err {
 								fmt.Println("server recv err:", err)
 								break

@@ -18,23 +18,22 @@ func IsNetTimeoutError(err error) bool {
 
 type ReadAble interface {
 	Read([]byte) (int, error)
+	SetReadDeadline(time.Time) error
 }
 
 type PacketReceiver interface {
-	Recv(ReadAble) ([]byte, error)
+	Recv(ReadAble, time.Time) ([]byte, error)
 }
 
 type Socket interface {
-	Send([]byte) (int, error)
-	Recv() ([]byte, error)
+	Send([]byte, ...time.Time) (int, error)
+	Recv(...time.Time) ([]byte, error)
 	LocalAddr() net.Addr
 	RemoteAddr() net.Addr
 	SetUserData(ud interface{})
 	GetUserData() interface{}
 	GetUnderConn() interface{}
 	Close()
-	SetSendDeadline(time.Time)
-	SetRecvDeadline(time.Time)
 }
 
 type userdata struct {
@@ -45,7 +44,18 @@ type defaultPacketReceiver struct {
 	recvbuf []byte
 }
 
-func (dr *defaultPacketReceiver) Recv(r ReadAble) ([]byte, error) {
-	n, err := r.Read(dr.recvbuf)
+func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, error) {
+	var (
+		n   int
+		err error
+	)
+
+	if deadline.IsZero() {
+		n, err = r.Read(dr.recvbuf)
+	} else {
+		r.SetReadDeadline(deadline)
+		n, err = r.Read(dr.recvbuf)
+		r.SetReadDeadline(time.Time{})
+	}
 	return dr.recvbuf[:n], err
 }

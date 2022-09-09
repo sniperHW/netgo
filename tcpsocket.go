@@ -16,14 +16,6 @@ type tcpSocket struct {
 	closeOnce      sync.Once
 }
 
-func (tc *tcpSocket) SetSendDeadline(deadline time.Time) {
-	tc.conn.SetWriteDeadline(deadline)
-}
-
-func (tc *tcpSocket) SetRecvDeadline(deadline time.Time) {
-	tc.conn.SetReadDeadline(deadline)
-}
-
 func (tc *tcpSocket) LocalAddr() net.Addr {
 	return tc.conn.LocalAddr()
 }
@@ -57,12 +49,23 @@ func (tc *tcpSocket) Close() {
 	})
 }
 
-func (tc *tcpSocket) Send(data []byte) (int, error) {
-	return tc.conn.Write(data)
+func (tc *tcpSocket) Send(data []byte, deadline ...time.Time) (int, error) {
+	if len(deadline) > 0 && !deadline[0].IsZero() {
+		tc.conn.SetWriteDeadline(deadline[0])
+		n, err := tc.conn.Write(data)
+		tc.conn.SetWriteDeadline(time.Time{})
+		return n, err
+	} else {
+		return tc.conn.Write(data)
+	}
 }
 
-func (tc *tcpSocket) Recv() ([]byte, error) {
-	return tc.packetReceiver.Recv(tc.conn)
+func (tc *tcpSocket) Recv(deadline ...time.Time) ([]byte, error) {
+	if len(deadline) > 0 && !deadline[0].IsZero() {
+		return tc.packetReceiver.Recv(tc.conn, deadline[0])
+	} else {
+		return tc.packetReceiver.Recv(tc.conn, time.Time{})
+	}
 }
 
 func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, error) {

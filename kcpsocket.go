@@ -17,14 +17,6 @@ type kcpSocket struct {
 	closeOnce      sync.Once
 }
 
-func (kc *kcpSocket) SetSendDeadline(deadline time.Time) {
-	kc.conn.SetWriteDeadline(deadline)
-}
-
-func (kc *kcpSocket) SetRecvDeadline(deadline time.Time) {
-	kc.conn.SetReadDeadline(deadline)
-}
-
 func (kc *kcpSocket) LocalAddr() net.Addr {
 	return kc.conn.LocalAddr()
 }
@@ -58,12 +50,23 @@ func (kc *kcpSocket) Close() {
 	})
 }
 
-func (kc *kcpSocket) Send(data []byte) (int, error) {
-	return kc.conn.Write(data)
+func (kc *kcpSocket) Send(data []byte, deadline ...time.Time) (int, error) {
+	if len(deadline) > 0 && !deadline[0].IsZero() {
+		kc.conn.SetWriteDeadline(deadline[0])
+		n, err := kc.conn.Write(data)
+		kc.conn.SetWriteDeadline(time.Time{})
+		return n, err
+	} else {
+		return kc.conn.Write(data)
+	}
 }
 
-func (kc *kcpSocket) Recv() ([]byte, error) {
-	return kc.packetReceiver.Recv(kc.conn)
+func (kc *kcpSocket) Recv(deadline ...time.Time) ([]byte, error) {
+	if len(deadline) > 0 && !deadline[0].IsZero() {
+		return kc.packetReceiver.Recv(kc.conn, deadline[0])
+	} else {
+		return kc.packetReceiver.Recv(kc.conn, time.Time{})
+	}
 }
 
 func NewKcpSocket(conn *kcp.UDPSession, packetReceiver ...PacketReceiver) (Socket, error) {
