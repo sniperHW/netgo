@@ -10,12 +10,11 @@ import (
 )
 
 var (
-	ErrRecvTimeout    error = errors.New("RecvTimeout")
-	ErrSendTimeout    error = errors.New("SendTimeout")
-	ErrSocketClosed   error = errors.New("SocketClosed")
-	ErrPushTimeout    error = errors.New("PushTimeout")
-	ErrAsyncSendBlock error = errors.New("ErrAsyncSendBlock")
-	ErrPushBusy       error = errors.New("ErrPushBusy")
+	ErrRecvTimeout     error = errors.New("RecvTimeout")
+	ErrSendTimeout     error = errors.New("SendTimeout")
+	ErrAsynSendTimeout error = errors.New("ErrAsynSendTimeout")
+	ErrSocketClosed    error = errors.New("SocketClosed")
+	ErrSendBusy        error = errors.New("ErrSendBusy")
 )
 
 /*
@@ -41,12 +40,13 @@ type EnCoder interface {
 }
 
 type AsynSocketOption struct {
-	Decoder            Decoder
-	Encoder            EnCoder
-	CloseCallBack      func(*AsynSocket, error)
-	SendChanSize       int
-	HandlePakcet       func(*AsynSocket, interface{}, error)
-	AsyncSendBlockTime time.Duration //异步发送调用send时的最大阻塞时间，如果超过这个时间将用ErrAsyncSendBlock错误关闭AsynSocket
+	Decoder          Decoder
+	Encoder          EnCoder
+	CloseCallBack    func(*AsynSocket, error)
+	SendChanSize     int
+	HandlePakcet     func(*AsynSocket, interface{})
+	OnEncodeError    func(*AsynSocket, error)
+	AsyncSendTimeout time.Duration
 }
 
 type defaultEncoder struct {
@@ -71,42 +71,33 @@ func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
 }
 
 type AsynSocket struct {
-	socket             Socket
-	decoder            Decoder
-	encoder            EnCoder
-	closeCh            chan struct{}
-	recvRequestCh      chan time.Time
-	sendRequestCh      chan interface{}
-	recvOnce           sync.Once
-	sendOnce           sync.Once
-	routineCount       int32
-	closeOnce          sync.Once
-	closeReason        atomic.Value
-	doCloseOnce        sync.Once
-	closeCallBack      func(*AsynSocket, error)
-	handlePakcet       func(*AsynSocket, interface{}, error)
-	asyncSendBlockTime time.Duration
-	shutdownRead       int32
-	sendError          int32
+	socket           Socket
+	decoder          Decoder
+	encoder          EnCoder
+	closeCh          chan struct{}
+	recvRequestCh    chan time.Time
+	sendRequestCh    chan interface{}
+	recvOnce         sync.Once
+	sendOnce         sync.Once
+	routineCount     int32
+	closeOnce        sync.Once
+	closeReason      atomic.Value
+	doCloseOnce      sync.Once
+	closeCallBack    func(*AsynSocket, error)
+	handlePakcet     func(*AsynSocket, interface{})
+	onEncodeError    func(*AsynSocket, error)
+	asyncSendTimeout time.Duration
+	shutdownRead     int32
+	sendError        int32
 }
 
 func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) {
 	if nil == socket {
 		return nil, errors.New("socket is nil")
 	}
+
 	if nil == option.HandlePakcet {
 		return nil, errors.New("HandlePakcet is nil")
-	}
-
-	if nil == option.Decoder {
-		option.Decoder = &defalutDecoder{}
-	}
-	if nil == option.Encoder {
-		option.Encoder = &defaultEncoder{}
-	}
-	if nil == option.CloseCallBack {
-		option.CloseCallBack = func(*AsynSocket, error) {
-		}
 	}
 
 	if option.SendChanSize <= 0 {
@@ -114,15 +105,31 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	}
 
 	s := &AsynSocket{
-		socket:             socket,
-		decoder:            option.Decoder,
-		encoder:            option.Encoder,
-		closeCallBack:      option.CloseCallBack,
-		closeCh:            make(chan struct{}),
-		recvRequestCh:      make(chan time.Time, 1),
-		sendRequestCh:      make(chan interface{}, option.SendChanSize),
-		handlePakcet:       option.HandlePakcet,
-		asyncSendBlockTime: option.AsyncSendBlockTime,
+		socket:           socket,
+		decoder:          option.Decoder,
+		encoder:          option.Encoder,
+		closeCallBack:    option.CloseCallBack,
+		closeCh:          make(chan struct{}),
+		recvRequestCh:    make(chan time.Time, 1),
+		sendRequestCh:    make(chan interface{}, option.SendChanSize),
+		handlePakcet:     option.HandlePakcet,
+		asyncSendTimeout: option.AsyncSendTimeout,
+		onEncodeError:    option.OnEncodeError,
+	}
+
+	if nil == s.decoder {
+		s.decoder = &defalutDecoder{}
+	}
+	if nil == s.encoder {
+		s.Encoder = &defaultEncoder{}
+	}
+	if nil == s.closeCallBack {
+		s.closeCallBack = func(*AsynSocket, error) {
+		}
+	}
+	if nil == s.onEncodeError {
+		s.onEncodeError = func(*AsynSocket, error) {
+		}
 	}
 
 	return s, nil
@@ -182,27 +189,17 @@ func (s *AsynSocket) getTimeout(timeout []time.Duration) time.Duration {
 	}
 }
 
-//发起一个异步读请求
-
+//发起异步读请求
 func (s *AsynSocket) Recv(timeout ...time.Duration) {
-	if t := s.getTimeout(timeout); t <= 0 {
-		select {
-		case <-s.closeCh:
-			s.handlePakcet(s, nil, ErrSocketClosed)
-		case s.recvRequestCh <- time.Time{}:
-			s.recvOnce.Do(s.recvloop)
-		}
-	} else {
-		ticker := time.NewTicker(t)
-		defer ticker.Stop()
-		select {
-		case <-s.closeCh:
-			s.handlePakcet(s, nil, ErrSocketClosed)
-		case <-ticker.C:
-			go s.handlePakcet(s, nil, ErrRecvTimeout)
-		case s.recvRequestCh <- time.Now().Add(t):
-			s.recvOnce.Do(s.recvloop)
-		}
+	deadline := time.Time{}
+	if t := s.getTimeout(timeout); t > 0 {
+		deadline = time.Now().Add(t)
+	}
+	select {
+	case <-s.closeCh:
+	case s.recvRequestCh <- deadline:
+		s.recvOnce.Do(s.recvloop)
+	default:
 	}
 }
 
@@ -215,25 +212,31 @@ func (s *AsynSocket) recvloop() {
 			}
 		}()
 
+		var (
+			buff   []byte
+			err    error
+			packet interface{}
+		)
+
 		for {
 			select {
 			case <-s.closeCh:
 				return
 			case deadline := <-s.recvRequestCh:
+				buff, err = s.socket.Recv(deadline)
 				if atomic.LoadInt32(&s.shutdownRead) == 1 {
 					return
 				} else {
-					buff, err := s.socket.Recv(deadline)
-					if atomic.LoadInt32(&s.shutdownRead) == 1 {
-						return
-					} else if nil == err {
-						packet, err := s.decoder.Decode(buff)
-						s.handlePakcet(s, packet, err)
+					if nil == err {
+						packet, err = s.decoder.Decode(buff)
+					}
+					if nil == err {
+						s.handlePakcet(s, packet)
 					} else {
 						if IsNetTimeoutError(err) {
 							err = ErrRecvTimeout
 						}
-						s.handlePakcet(s, nil, err)
+						s.Close(err)
 					}
 				}
 			}
@@ -241,52 +244,15 @@ func (s *AsynSocket) recvloop() {
 	}()
 }
 
-/*
- *  Send以及AsynSend不支持超时重试的原因：
- *
- *  Send和AsynSend可能同时发生，例如Send超时并发送部分数据，之后AsynSend执行并全部发送完毕，此时如果用户将未发送部分使用Send重发
- *  接收方将接收到乱序的数据。
- */
-
-//同步encode与发送
-
-//返回编码后的buff，如果发送超时将关闭asynsocket
-
-func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
-	select {
-	case <-s.closeCh:
-		return ErrSocketClosed
-	default:
-		buff, err := s.encoder.Encode([]byte{}, o)
-		if nil != err {
-			return err
-		} else {
-			deadline := time.Time{}
-			if t := s.getTimeout(timeout); t > 0 {
-				deadline = time.Now().Add(t)
-			}
-			_, err := s.socket.Send(buff, deadline)
-			if nil != err {
-				atomic.StoreInt32(&s.sendError, 1)
-				if IsNetTimeoutError(err) {
-					err = ErrSendTimeout
-				}
-				s.Close(err)
-			}
-			return err
-		}
-	}
-}
-
 func (s *AsynSocket) send(buff []byte) error {
 	deadline := time.Time{}
-	if s.asyncSendBlockTime > 0 {
-		deadline = time.Now().Add(s.asyncSendBlockTime)
+	if s.asyncSendTimeout > 0 {
+		deadline = time.Now().Add(s.asyncSendTimeout)
 	}
 	if _, err := s.socket.Send(buff, deadline); nil != err {
 		atomic.StoreInt32(&s.sendError, 1)
 		if IsNetTimeoutError(err) {
-			err = ErrSendTimeout
+			err = ErrAsynSendTimeout
 		}
 		s.Close(err)
 		return err
@@ -315,6 +281,7 @@ func (s *AsynSocket) sendloop() {
 						o := <-s.sendRequestCh
 						size := len(buff)
 						if buff, err = s.encoder.Encode(buff, o); nil != err {
+							s.onEncodeError(s, err)
 							buff = buff[:size]
 						} else if len(buff) >= maxSendBlockSize {
 							if nil != s.send(buff) {
@@ -333,6 +300,7 @@ func (s *AsynSocket) sendloop() {
 			case o := <-s.sendRequestCh:
 				size := len(buff)
 				if buff, err = s.encoder.Encode(buff, o); nil != err {
+					s.onEncodeError(s, err)
 					buff = buff[:size]
 				} else if len(buff) >= maxSendBlockSize || len(s.sendRequestCh) == 0 {
 					s.send(buff)
@@ -353,14 +321,14 @@ func (s *AsynSocket) sendloop() {
 
 //timeout < 0:如果无法投递返回ErrPushBusy
 
-func (s *AsynSocket) Push(o interface{}, timeout ...time.Duration) error {
+func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
+	s.sendOnce.Do(s.sendloop)
 	if t := s.getTimeout(timeout); t == 0 {
 		//一直等待
 		select {
 		case <-s.closeCh:
 			return ErrSocketClosed
 		case s.sendRequestCh <- o:
-			s.sendOnce.Do(s.sendloop)
 			return nil
 		}
 	} else if t > 0 {
@@ -371,9 +339,8 @@ func (s *AsynSocket) Push(o interface{}, timeout ...time.Duration) error {
 		case <-s.closeCh:
 			return ErrSocketClosed
 		case <-ticker.C:
-			return ErrPushTimeout
+			return ErrSendTimeout
 		case s.sendRequestCh <- o:
-			s.sendOnce.Do(s.sendloop)
 			return nil
 		}
 	} else {
@@ -382,10 +349,9 @@ func (s *AsynSocket) Push(o interface{}, timeout ...time.Duration) error {
 		case <-s.closeCh:
 			return ErrSocketClosed
 		case s.sendRequestCh <- o:
-			s.sendOnce.Do(s.sendloop)
 			return nil
 		default:
-			return ErrPushBusy
+			return ErrSendBusy
 		}
 	}
 }

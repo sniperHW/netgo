@@ -187,15 +187,10 @@ func TestAsynSocket(t *testing.T) {
 						CloseCallBack: func(_ *AsynSocket, err error) {
 							fmt.Println("server closed err:", err)
 						},
-						HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
-							fmt.Println("server HandlePakcet")
-							if nil != err {
-								as.Close(err)
-							} else {
-								fmt.Println("server on packet", string(packet.([]byte)))
-								as.Push(packet)
-								as.Recv(time.Second)
-							}
+						HandlePakcet: func(as *AsynSocket, packet interface{}) {
+							fmt.Println("server on packet", string(packet.([]byte)))
+							as.Send(packet)
+							as.Recv(time.Second)
 						},
 					})
 					as.Recv(time.Second)
@@ -215,23 +210,18 @@ func TestAsynSocket(t *testing.T) {
 				CloseCallBack: func(_ *AsynSocket, err error) {
 					fmt.Println("client closed err:", err)
 				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
-					if nil != err {
-						fmt.Println("on client recv err", err)
-						as.Close(err)
-						close(okChan)
-					} else {
-						fmt.Println("client", string(packet.([]byte)))
-						close(okChan)
-					}
+				HandlePakcet: func(as *AsynSocket, packet interface{}) {
+					fmt.Println("client", string(packet.([]byte)))
+					close(okChan)
 				},
 			})
-
-			as.Send([]byte("hello"))
 			as.Recv()
+			fmt.Println("send", as.Send([]byte("hello")))
 			<-okChan
 			as.Close(nil)
 		}
+
+		fmt.Println("-----------------------------")
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
@@ -240,15 +230,9 @@ func TestAsynSocket(t *testing.T) {
 			as, _ := NewAsynSocket(s, AsynSocketOption{
 				CloseCallBack: func(_ *AsynSocket, err error) {
 					fmt.Println("client closed err:", err)
+					close(okChan)
 				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
-					if nil != err {
-						as.Close(err)
-						close(okChan)
-					} else {
-						fmt.Println("client", string(packet.([]byte)))
-						close(okChan)
-					}
+				HandlePakcet: func(as *AsynSocket, packet interface{}) {
 				},
 			})
 			as.Recv()
@@ -280,17 +264,13 @@ func TestAsynSocket(t *testing.T) {
 						CloseCallBack: func(_ *AsynSocket, err error) {
 							fmt.Println("server closed err:", err)
 						},
-						HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
-							if nil != err {
-								as.Close(err)
+						HandlePakcet: func(as *AsynSocket, packet interface{}) {
+							i = i + len(packet.([]byte))
+							fmt.Println(i)
+							if i == 100*5 {
+								close(okChan)
 							} else {
-								i = i + len(packet.([]byte))
-								fmt.Println(i)
-								if i == 100*5 {
-									close(okChan)
-								} else {
-									as.Recv(time.Second)
-								}
+								as.Recv(time.Second)
 							}
 						},
 					})
@@ -310,15 +290,12 @@ func TestAsynSocket(t *testing.T) {
 				CloseCallBack: func(_ *AsynSocket, err error) {
 					fmt.Println("client closed err:", err)
 				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}, err error) {
-					if nil != err {
-						as.Close(err)
-					}
+				HandlePakcet: func(as *AsynSocket, packet interface{}) {
 				},
 			})
 
 			for i := 0; i < 100; i++ {
-				as.Push([]byte("hello"))
+				as.Send([]byte("hello"))
 			}
 
 			as.Close(nil)
