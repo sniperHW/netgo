@@ -32,10 +32,10 @@ func (kc *kcpSocket) SetUserData(ud interface{}) {
 }
 
 func (kc *kcpSocket) GetUserData() interface{} {
-	if ud := kc.userData.Load(); nil == ud {
-		return nil
+	if ud, ok := kc.userData.Load().(userdata); ok {
+		return ud
 	} else {
-		return ud.(userdata).data
+		return nil
 	}
 }
 

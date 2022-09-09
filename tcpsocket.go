@@ -31,10 +31,10 @@ func (tc *tcpSocket) SetUserData(ud interface{}) {
 }
 
 func (tc *tcpSocket) GetUserData() interface{} {
-	if ud := tc.userData.Load(); nil == ud {
-		return nil
+	if ud, ok := tc.userData.Load().(userdata); ok {
+		return ud
 	} else {
-		return ud.(userdata).data
+		return nil
 	}
 }
 

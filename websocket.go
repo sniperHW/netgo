@@ -31,10 +31,10 @@ func (wc *webSocket) SetUserData(ud interface{}) {
 }
 
 func (wc *webSocket) GetUserData() interface{} {
-	if ud := wc.userData.Load(); nil == ud {
-		return nil
+	if ud, ok := wc.userData.Load().(userdata); ok {
+		return ud
 	} else {
-		return ud.(userdata).data
+		return nil
 	}
 }
 
