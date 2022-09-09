@@ -1,5 +1,5 @@
 # Network utility for go
 
-use `type Socket interface` for block socket
+`Socket` for synchronize socket
 
-use `type AsynSocket struct` for async socket
+`AsynSocket` for asynchronize socket
