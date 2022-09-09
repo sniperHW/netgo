@@ -3,16 +3,11 @@ package network
 import (
 	"errors"
 	//"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 	"time"
 )
-
-type OutputBufLimit struct {
-	OutPutLimitSoft        int
-	OutPutLimitSoftSeconds int
-	OutPutLimitHard        int
-}
 
 var (
 	ErrRecvTimeout    error = errors.New("RecvTimeout")
@@ -133,6 +128,26 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	return s, nil
 }
 
+func (s *AsynSocket) LocalAddr() net.Addr {
+	return s.socket.LocalAddr()
+}
+
+func (s *AsynSocket) RemoteAddr() net.Addr {
+	return s.socket.RemoteAddr()
+}
+
+func (s *AsynSocket) SetUserData(ud interface{}) {
+	s.socket.SetUserData(ud)
+}
+
+func (s *AsynSocket) GetUserData() interface{} {
+	return s.socket.GetUserData()
+}
+
+func (s *AsynSocket) GetUnderConn() interface{} {
+	return s.socket.GetUnderConn()
+}
+
 func (s *AsynSocket) doCloseCallback() {
 	s.doCloseOnce.Do(func() {
 		s.socket.Close()
@@ -159,15 +174,18 @@ func (s *AsynSocket) Close(err error) {
 	})
 }
 
+func (s *AsynSocket) getTimeout(timeout []time.Duration) time.Duration {
+	if len(timeout) > 0 {
+		return timeout[0]
+	} else {
+		return 0
+	}
+}
+
 //发起一个异步读请求
 
 func (s *AsynSocket) Recv(timeout ...time.Duration) {
-	var _timeout time.Duration
-	if len(timeout) > 0 {
-		_timeout = timeout[0]
-	}
-
-	if _timeout <= 0 {
+	if t := s.getTimeout(timeout); t <= 0 {
 		select {
 		case <-s.closeCh:
 			s.handlePakcet(s, nil, ErrSocketClosed)
@@ -175,14 +193,14 @@ func (s *AsynSocket) Recv(timeout ...time.Duration) {
 			s.recvOnce.Do(s.recvloop)
 		}
 	} else {
-		ticker := time.NewTicker(_timeout)
+		ticker := time.NewTicker(t)
 		defer ticker.Stop()
 		select {
 		case <-s.closeCh:
 			s.handlePakcet(s, nil, ErrSocketClosed)
 		case <-ticker.C:
 			go s.handlePakcet(s, nil, ErrRecvTimeout)
-		case s.recvRequestCh <- time.Now().Add(_timeout):
+		case s.recvRequestCh <- time.Now().Add(t):
 			s.recvOnce.Do(s.recvloop)
 		}
 	}
@@ -235,10 +253,6 @@ func (s *AsynSocket) recvloop() {
 //返回编码后的buff，如果发送超时将关闭asynsocket
 
 func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
-	var _timeout time.Duration
-	if len(timeout) > 0 {
-		_timeout = timeout[0]
-	}
 	select {
 	case <-s.closeCh:
 		return ErrSocketClosed
@@ -248,8 +262,8 @@ func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
 			return err
 		} else {
 			deadline := time.Time{}
-			if _timeout > 0 {
-				deadline = time.Now().Add(_timeout)
+			if t := s.getTimeout(timeout); t > 0 {
+				deadline = time.Now().Add(t)
 			}
 			_, err := s.socket.Send(buff, deadline)
 			if nil != err {
@@ -340,11 +354,7 @@ func (s *AsynSocket) sendloop() {
 //timeout < 0:如果无法投递返回ErrPushBusy
 
 func (s *AsynSocket) Push(o interface{}, timeout ...time.Duration) error {
-	var _timeout time.Duration
-	if len(timeout) > 0 {
-		_timeout = timeout[0]
-	}
-	if _timeout == 0 {
+	if t := s.getTimeout(timeout); t == 0 {
 		//一直等待
 		select {
 		case <-s.closeCh:
@@ -353,9 +363,9 @@ func (s *AsynSocket) Push(o interface{}, timeout ...time.Duration) error {
 			s.sendOnce.Do(s.sendloop)
 			return nil
 		}
-	} else if _timeout > 0 {
+	} else if t > 0 {
 		//等待到deadline
-		ticker := time.NewTicker(_timeout)
+		ticker := time.NewTicker(t)
 		defer ticker.Stop()
 		select {
 		case <-s.closeCh:
