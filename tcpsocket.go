@@ -53,9 +53,9 @@ func (tc *tcpSocket) Send(data []byte, deadline ...time.Time) (int, error) {
 	if len(deadline) > 0 && !deadline[0].IsZero() {
 		tc.conn.SetWriteDeadline(deadline[0])
 		n, err := tc.conn.Write(data)
-		tc.conn.SetWriteDeadline(time.Time{})
 		return n, err
 	} else {
+		tc.conn.SetWriteDeadline(time.Time{})
 		return tc.conn.Write(data)
 	}
 }

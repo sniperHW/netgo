@@ -22,26 +22,9 @@ var (
  * 提供异步recv和send处理
  */
 
-type Decoder interface {
-	//将[]byte解码成对象
-
-	//如果成功返回对象,否则返回错误
-
-	Decode([]byte) (interface{}, error)
-}
-
-type EnCoder interface {
-
-	//将对象编码到[]byte中
-
-	//如果成功返回添了对象编码的[]byte,否则返回错误
-
-	Encode([]byte, interface{}) ([]byte, error)
-}
-
 type AsynSocketOption struct {
-	Decoder          Decoder
-	Encoder          EnCoder
+	Decoder          ObjDecoder
+	Packer           ObjPacker
 	CloseCallBack    func(*AsynSocket, error)
 	SendChanSize     int
 	HandlePakcet     func(*AsynSocket, interface{})
@@ -49,10 +32,10 @@ type AsynSocketOption struct {
 	AsyncSendTimeout time.Duration
 }
 
-type defaultEncoder struct {
+type defaultPacker struct {
 }
 
-func (de *defaultEncoder) Encode(buff []byte, o interface{}) ([]byte, error) {
+func (de *defaultPacker) Pack(buff []byte, o interface{}) ([]byte, error) {
 	switch o.(type) {
 	case []byte:
 		return append(buff, o.([]byte)...), nil
@@ -72,8 +55,8 @@ func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
 
 type AsynSocket struct {
 	socket           Socket
-	decoder          Decoder
-	encoder          EnCoder
+	decoder          ObjDecoder
+	packer           ObjPacker
 	closeCh          chan struct{}
 	recvRequestCh    chan time.Time
 	sendRequestCh    chan interface{}
@@ -107,7 +90,7 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	s := &AsynSocket{
 		socket:           socket,
 		decoder:          option.Decoder,
-		encoder:          option.Encoder,
+		packer:           option.Packer,
 		closeCallBack:    option.CloseCallBack,
 		closeCh:          make(chan struct{}),
 		recvRequestCh:    make(chan time.Time, 1),
@@ -120,8 +103,8 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	if nil == s.decoder {
 		s.decoder = &defalutDecoder{}
 	}
-	if nil == s.encoder {
-		s.Encoder = &defaultEncoder{}
+	if nil == s.packer {
+		s.packer = &defaultPacker{}
 	}
 	if nil == s.closeCallBack {
 		s.closeCallBack = func(*AsynSocket, error) {
@@ -280,7 +263,7 @@ func (s *AsynSocket) sendloop() {
 					for len(s.sendRequestCh) > 0 {
 						o := <-s.sendRequestCh
 						size := len(buff)
-						if buff, err = s.encoder.Encode(buff, o); nil != err {
+						if buff, err = s.packer.Pack(buff, o); nil != err {
 							s.onEncodeError(s, err)
 							buff = buff[:size]
 						} else if len(buff) >= maxSendBlockSize {
@@ -299,7 +282,7 @@ func (s *AsynSocket) sendloop() {
 				return
 			case o := <-s.sendRequestCh:
 				size := len(buff)
-				if buff, err = s.encoder.Encode(buff, o); nil != err {
+				if buff, err = s.packer.Pack(buff, o); nil != err {
 					s.onEncodeError(s, err)
 					buff = buff[:size]
 				} else if len(buff) >= maxSendBlockSize || len(s.sendRequestCh) == 0 {

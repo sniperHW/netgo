@@ -16,6 +16,23 @@ func IsNetTimeoutError(err error) bool {
 	return false
 }
 
+type ObjDecoder interface {
+	//将[]byte解码成对象
+
+	//如果成功返回对象,否则返回错误
+
+	Decode([]byte) (interface{}, error)
+}
+
+type ObjPacker interface {
+
+	//将对象编码,打包成一个网络包
+
+	//如果成功返回添了对象编码的[]byte,否则返回错误
+
+	Pack([]byte, interface{}) ([]byte, error)
+}
+
 type ReadAble interface {
 	Read([]byte) (int, error)
 	SetReadDeadline(time.Time) error
@@ -51,11 +68,11 @@ func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, e
 	)
 
 	if deadline.IsZero() {
+		r.SetReadDeadline(time.Time{})
 		n, err = r.Read(dr.recvbuf)
 	} else {
 		r.SetReadDeadline(deadline)
 		n, err = r.Read(dr.recvbuf)
-		r.SetReadDeadline(time.Time{})
 	}
 	return dr.recvbuf[:n], err
 }

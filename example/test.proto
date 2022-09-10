@@ -1,0 +1,6 @@
+syntax = "proto2";
+package main;
+
+message Echo {
+	required string msg = 1;
+}
