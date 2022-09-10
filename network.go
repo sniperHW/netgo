@@ -58,7 +58,6 @@ type userdata struct {
 }
 
 type defaultPacketReceiver struct {
-	recvbuf []byte
 }
 
 func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, error) {
@@ -67,12 +66,14 @@ func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, e
 		err error
 	)
 
+	buff := make([]byte, 4096)
+
 	if deadline.IsZero() {
 		r.SetReadDeadline(time.Time{})
-		n, err = r.Read(dr.recvbuf)
+		n, err = r.Read(buff)
 	} else {
 		r.SetReadDeadline(deadline)
-		n, err = r.Read(dr.recvbuf)
+		n, err = r.Read(buff)
 	}
-	return dr.recvbuf[:n], err
+	return buff[:n], err
 }

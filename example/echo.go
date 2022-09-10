@@ -5,6 +5,9 @@ import (
 	"errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/sniperHW/network"
+	"log"
+	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -98,4 +101,149 @@ func (r *PacketReceiver) Recv(readable network.ReadAble, deadline time.Time) (pk
 			return
 		}
 	}
+}
+
+const (
+	logicService string = "localhost:8111"
+	gateService  string = "localhost:8110"
+)
+
+func runLogicSvr() {
+	tcpAddr, _ := net.ResolveTCPAddr("tcp", logicService)
+	listener, _ := net.ListenTCP("tcp", tcpAddr)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			} else {
+				s, _ := network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
+				as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
+					HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
+						as.Send(packet)
+						as.Recv()
+					},
+					Decoder: &PBDecoder{},
+					Packer:  &PBPacker{},
+				})
+				as.Recv()
+			}
+		}
+	}()
+}
+
+func runGateSvr() {
+	dialer := &net.Dialer{}
+	tcpAddr, _ := net.ResolveTCPAddr("tcp", gateService)
+	listener, _ := net.ListenTCP("tcp", tcpAddr)
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			} else {
+				go func() {
+					cli, _ := network.NewTcpSocket(conn)
+					var (
+						logic network.Socket
+					)
+
+					for i := 0; i < 3; i++ {
+						if logicConn, err := dialer.Dial("tcp", logicService); nil != err {
+							time.Sleep(time.Second)
+						} else {
+							logic, _ = network.NewTcpSocket(logicConn)
+							break
+						}
+					}
+
+					if nil == logic {
+						cli.Close()
+					} else {
+						defer func() {
+							cli.Close()
+							logic.Close()
+						}()
+
+						for {
+							var n int
+							//recv a from client
+							dataClient, err := cli.Recv()
+							if nil != err {
+								return
+							}
+
+							//send to logic
+							n, err = logic.Send(dataClient)
+							if nil != err {
+								return
+							}
+
+							for n > 0 {
+								//recv response from logic
+								dataLogic, err := logic.Recv()
+								if nil != err {
+									return
+								}
+								n -= len(dataLogic)
+								//response client
+								_, err = cli.Send(dataLogic)
+								if nil != err {
+									return
+								}
+							}
+						}
+					}
+				}()
+			}
+		}
+	}()
+}
+
+func runClient() {
+	dialer := &net.Dialer{}
+	var (
+		s network.Socket
+	)
+
+	for {
+		if conn, err := dialer.Dial("tcp", gateService); nil != err {
+			time.Sleep(time.Second)
+		} else {
+			s, _ = network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
+			break
+		}
+	}
+
+	okChan := make(chan struct{})
+	count := int32(0)
+
+	as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
+		CloseCallBack: func(_ *network.AsynSocket, err error) {
+			log.Println("client closed err:", err)
+		},
+		HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
+			c := atomic.AddInt32(&count, 1)
+			log.Println("go echo resp", c)
+			if c == 100 {
+				close(okChan)
+			} else {
+				as.Recv()
+			}
+		},
+		Decoder: &PBDecoder{},
+		Packer:  &PBPacker{},
+	})
+	as.Recv()
+	for i := 0; i < 100; i++ {
+		as.Send(&Echo{Msg: proto.String("hello")})
+	}
+	<-okChan
+	as.Close(nil)
+}
+
+func main() {
+	runLogicSvr()
+	runGateSvr()
+	runClient()
 }

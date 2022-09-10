@@ -84,9 +84,7 @@ func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, erro
 	}
 
 	if len(packetReceiver) == 0 || packetReceiver[0] == nil {
-		s.packetReceiver = &defaultPacketReceiver{
-			recvbuf: make([]byte, 65535),
-		}
+		s.packetReceiver = &defaultPacketReceiver{}
 	} else {
 		s.packetReceiver = packetReceiver[0]
 	}

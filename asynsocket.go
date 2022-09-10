@@ -118,6 +118,10 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	return s, nil
 }
 
+func (s *AsynSocket) GetUnderSocket() Socket {
+	return s.socket
+}
+
 func (s *AsynSocket) LocalAddr() net.Addr {
 	return s.socket.LocalAddr()
 }
