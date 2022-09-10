@@ -4,16 +4,16 @@ package network
 //go tool cover -html=coverage.out
 import (
 	"crypto/sha1"
-	"fmt"
-	gorilla "github.com/gorilla/websocket"
-	"github.com/xtaci/kcp-go/v5"
-	"golang.org/x/crypto/pbkdf2"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"testing"
 	"time"
+
+	gorilla "github.com/gorilla/websocket"
+	"github.com/xtaci/kcp-go/v5"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 func TestKcpSocket(t *testing.T) {
@@ -33,14 +33,14 @@ func TestKcpSocket(t *testing.T) {
 					return
 				}
 
-				fmt.Println("on new client")
+				log.Println("TestKcpSocket:on new client")
 
 				s, _ := NewKcpSocket(conn)
 				go func() {
 					for {
 						packet, err := s.Recv()
 						if nil != err {
-							fmt.Println("server recv err:", err)
+							log.Println("TestKcpSocket:server recv err:", err)
 							break
 						}
 						s.Send(packet)
@@ -65,7 +65,7 @@ func TestKcpSocket(t *testing.T) {
 
 			packet, err := s.Recv()
 
-			fmt.Println("client", string(packet), err)
+			log.Println("TestKcpSocket:client", string(packet), err)
 
 			s.Close()
 		} else {
@@ -93,18 +93,18 @@ func TestWebSocket(t *testing.T) {
 			conn, _ := upgrader.Upgrade(w, r, nil)
 
 			conn.SetPingHandler(func(appData string) error {
-				fmt.Println("on ping")
+				log.Println("TestWebSocket:on ping")
 				conn.WriteMessage(gorilla.PongMessage, []byte(appData))
 				return nil
 			})
 
-			fmt.Println("on client")
+			log.Println("TestWebSocket:on client")
 			s, _ := NewWebSocket(conn)
 			go func() {
 				for {
 					packet, err := s.Recv()
 					if nil != err {
-						fmt.Println("server recv err:", err)
+						log.Println("TestWebSocket:server recv err:", err)
 						break
 					}
 					s.Send(packet)
@@ -130,7 +130,7 @@ func TestWebSocket(t *testing.T) {
 			conn.WriteMessage(gorilla.PingMessage, []byte("hello"))
 
 			conn.SetPongHandler(func(appData string) error {
-				fmt.Println("on pong")
+				log.Println("TestWebSocket:on pong")
 				close(respChan)
 				return nil
 			})
@@ -157,7 +157,7 @@ func TestWebSocket(t *testing.T) {
 
 			packet, err := s.Recv()
 
-			fmt.Println("client", string(packet), err)
+			log.Println("TestWebSocket:client", string(packet), err)
 
 			s.Close()
 		}
@@ -168,7 +168,6 @@ func TestWebSocket(t *testing.T) {
 }
 
 func TestAsynSocket(t *testing.T) {
-
 	{
 
 		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
@@ -181,14 +180,14 @@ func TestAsynSocket(t *testing.T) {
 				if err != nil {
 					return
 				} else {
-					fmt.Println("on client")
+					log.Println("TestAsynSocket: on client")
 					s, _ := NewTcpSocket(conn)
 					as, _ := NewAsynSocket(s, AsynSocketOption{
 						CloseCallBack: func(_ *AsynSocket, err error) {
-							fmt.Println("server closed err:", err)
+							log.Println("TestAsynSocket: server closed err:", err)
 						},
 						HandlePakcet: func(as *AsynSocket, packet interface{}) {
-							fmt.Println("server on packet", string(packet.([]byte)))
+							log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
 							as.Send(packet)
 							as.Recv(time.Second)
 						},
@@ -208,20 +207,20 @@ func TestAsynSocket(t *testing.T) {
 
 			as, _ := NewAsynSocket(s, AsynSocketOption{
 				CloseCallBack: func(_ *AsynSocket, err error) {
-					fmt.Println("client closed err:", err)
+					log.Println("TestAsynSocket: client closed err:", err)
 				},
 				HandlePakcet: func(as *AsynSocket, packet interface{}) {
-					fmt.Println("client", string(packet.([]byte)))
+					log.Println("TestAsynSocket: client", string(packet.([]byte)))
 					close(okChan)
 				},
 			})
 			as.Recv()
-			fmt.Println("send", as.Send([]byte("hello")))
+			log.Println("TestAsynSocket: send", as.Send([]byte("hello")))
 			<-okChan
 			as.Close(nil)
 		}
 
-		fmt.Println("-----------------------------")
+		log.Println("TestAsynSocket:-----------------------------")
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
@@ -229,7 +228,7 @@ func TestAsynSocket(t *testing.T) {
 			okChan := make(chan struct{})
 			as, _ := NewAsynSocket(s, AsynSocketOption{
 				CloseCallBack: func(_ *AsynSocket, err error) {
-					fmt.Println("client closed err:", err)
+					log.Println("TestAsynSocket:client closed err:", err)
 					close(okChan)
 				},
 				HandlePakcet: func(as *AsynSocket, packet interface{}) {
@@ -257,16 +256,16 @@ func TestAsynSocket(t *testing.T) {
 				if err != nil {
 					return
 				} else {
-					fmt.Println("on client")
+					log.Println("TestAsynSocket:on client")
 					i := 0
 					s, _ := NewTcpSocket(conn)
 					as, _ := NewAsynSocket(s, AsynSocketOption{
 						CloseCallBack: func(_ *AsynSocket, err error) {
-							fmt.Println("server closed err:", err)
+							log.Println("TestAsynSocket:server closed err:", err)
 						},
 						HandlePakcet: func(as *AsynSocket, packet interface{}) {
 							i = i + len(packet.([]byte))
-							fmt.Println(i)
+							log.Println("TestAsynSocket:", i)
 							if i == 100*5 {
 								close(okChan)
 							} else {
@@ -288,7 +287,7 @@ func TestAsynSocket(t *testing.T) {
 			as, _ := NewAsynSocket(s, AsynSocketOption{
 				SendChanSize: 1000,
 				CloseCallBack: func(_ *AsynSocket, err error) {
-					fmt.Println("client closed err:", err)
+					log.Println("TestAsynSocket:client closed err:", err)
 				},
 				HandlePakcet: func(as *AsynSocket, packet interface{}) {
 				},
@@ -303,8 +302,9 @@ func TestAsynSocket(t *testing.T) {
 			<-okChan
 		}
 
-	}
+		listener.Close()
 
+	}
 }
 
 func TestTCPSocket(t *testing.T) {
@@ -320,13 +320,13 @@ func TestTCPSocket(t *testing.T) {
 				if err != nil {
 					return
 				} else {
-					fmt.Println("on client")
+					log.Println("TestTCPSocket:on client")
 					s, _ := NewTcpSocket(conn)
 					go func() {
 						for {
 							packet, err := s.Recv(time.Now().Add(time.Second))
 							if nil != err {
-								fmt.Println("server recv err:", err)
+								log.Println("TestTCPSocket:server recv err:", err)
 								break
 							}
 							s.Send(packet)
@@ -344,7 +344,7 @@ func TestTCPSocket(t *testing.T) {
 			s, _ := NewTcpSocket(conn)
 			s.Send([]byte("hello"))
 			packet, err := s.Recv()
-			fmt.Println("client", string(packet), err)
+			log.Println("TestTCPSocket:client", string(packet), err)
 			s.Close()
 		}
 
@@ -352,7 +352,7 @@ func TestTCPSocket(t *testing.T) {
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
 			s, _ := NewTcpSocket(conn)
 			packet, err := s.Recv()
-			fmt.Println("client", string(packet), err)
+			log.Println("TestTCPSocket:client", string(packet), err)
 			s.Close()
 
 		}

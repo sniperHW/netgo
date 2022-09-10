@@ -6,30 +6,30 @@ import (
 )
 
 func IsNetTimeoutError(err error) bool {
-	switch err.(type) {
-	case net.Error:
-		if err.(net.Error).Timeout() {
-			return true
-		}
-	default:
+	if e, ok := err.(net.Error); ok && e.Timeout() {
+		return true
+	} else {
+		return false
 	}
-	return false
 }
 
+//convert obj from binary buff
 type ObjDecoder interface {
-	//将[]byte解码成对象
-
-	//如果成功返回对象,否则返回错误
-
 	Decode([]byte) (interface{}, error)
 }
 
+//converto obj to binary packet for send
 type ObjPacker interface {
 
-	//将对象编码,打包成一个网络包
-
-	//如果成功返回添了对象编码的[]byte,否则返回错误
-
+	// Example:
+	//
+	// Pack(buff []byte, o interface{}) ([]byte,error) {
+	//	if b,err := encode2Packet(o) {
+	//		return append(buff,b...),nil
+	//	} else {
+	//		return buff,err
+	//	}
+	//}
 	Pack([]byte, interface{}) ([]byte, error)
 }
 
@@ -38,18 +38,34 @@ type ReadAble interface {
 	SetReadDeadline(time.Time) error
 }
 
+//recv a completely packet from ReadAble
 type PacketReceiver interface {
 	Recv(ReadAble, time.Time) ([]byte, error)
 }
 
+//interface for stream oriented socket
 type Socket interface {
+
+	//request send buff,if send block,wait unitl deadline
+	//
+	//if send ok return len(buff),nil. else return 0,reason
+	//
+	//if send is return with timeout,the first return value may more than zero but less then(len(buff))
 	Send([]byte, ...time.Time) (int, error)
+
+	//request receive a completely packet,if no packet avaliable,wait until deadline
 	Recv(...time.Time) ([]byte, error)
+
 	LocalAddr() net.Addr
+
 	RemoteAddr() net.Addr
+
 	SetUserData(ud interface{})
+
 	GetUserData() interface{}
+
 	GetUnderConn() interface{}
+
 	Close()
 }
 
@@ -60,6 +76,7 @@ type userdata struct {
 type defaultPacketReceiver struct {
 }
 
+//default PacketReceiver,all data from each read is returned as a packet
 func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, error) {
 	var (
 		n   int
