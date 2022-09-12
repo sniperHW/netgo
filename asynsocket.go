@@ -143,15 +143,11 @@ func (s *AsynSocket) GetUnderConn() interface{} {
 	return s.socket.GetUnderConn()
 }
 
-func (s *AsynSocket) doCloseCallback() {
+func (s *AsynSocket) doClose() {
 	s.doCloseOnce.Do(func() {
 		s.socket.Close()
-		reason := s.closeReason.Load()
-		if nil != reason {
-			s.closeCallBack(s, reason.(error))
-		} else {
-			s.closeCallBack(s, nil)
-		}
+		reason, _ := s.closeReason.Load().(error)
+		s.closeCallBack(s, reason)
 	})
 }
 
@@ -163,7 +159,7 @@ func (s *AsynSocket) Close(err error) {
 		}
 		close(s.die)
 		if atomic.AddInt32(&s.routineCount, -1) == 0 {
-			s.doCloseCallback()
+			go s.doClose()
 		}
 	})
 }
@@ -201,7 +197,7 @@ func (s *AsynSocket) recvloop() {
 	go func() {
 		defer func() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
-				s.doCloseCallback()
+				s.doClose()
 			}
 		}()
 
@@ -262,7 +258,7 @@ func (s *AsynSocket) sendloop() {
 		var err error
 		defer func() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
-				s.doCloseCallback()
+				s.doClose()
 			}
 		}()
 		for {
