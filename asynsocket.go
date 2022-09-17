@@ -26,6 +26,7 @@ type AsynSocketOption struct {
 	OnRecvTimeout    func(*AsynSocket)
 	OnEncodeError    func(*AsynSocket, error)
 	AsyncSendTimeout time.Duration
+	SendBuffSize     int
 }
 
 type defaultPacker struct {
@@ -48,6 +49,29 @@ func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
 	return packet, nil
 }
 
+type movingAverage struct {
+	head    int
+	window  []int
+	total   int
+	wc      int
+	average int
+}
+
+func (ma *movingAverage) add(v int) {
+	if ma.wc < len(ma.window) {
+		//窗口没有填满
+		ma.window[ma.head] = v
+		ma.head = (ma.head + 1) % len(ma.window)
+		ma.wc++
+	} else {
+		ma.total -= ma.window[ma.head]
+		ma.window[ma.head] = v
+		ma.head = (ma.head + 1) % len(ma.window)
+	}
+	ma.total += v
+	ma.average = ma.total / ma.wc
+}
+
 //asynchronize encapsulation for Socket
 type AsynSocket struct {
 	socket           Socket
@@ -67,6 +91,8 @@ type AsynSocket struct {
 	onEncodeError    func(*AsynSocket, error)
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
+	sendAverage      movingAverage
+	sendBuffSize     int
 }
 
 func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) {
@@ -94,6 +120,10 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		asyncSendTimeout: option.AsyncSendTimeout,
 		onEncodeError:    option.OnEncodeError,
 		onRecvTimeout:    option.OnRecvTimeout,
+		sendBuffSize:     option.SendBuffSize,
+		sendAverage: movingAverage{
+			window: make([]int, 10),
+		},
 	}
 
 	if nil == s.decoder {
@@ -114,6 +144,9 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		s.onRecvTimeout = func(*AsynSocket) {
 			s.Close(ErrRecvTimeout)
 		}
+	}
+	if s.sendBuffSize <= 0 {
+		s.sendBuffSize = 1024
 	}
 
 	return s, nil
@@ -254,7 +287,7 @@ func (s *AsynSocket) sendloop() {
 	const maxSendBlockSize int = 65535
 	atomic.AddInt32(&s.routineCount, 1)
 	go func() {
-		var buff []byte = make([]byte, 0, 4096)
+		var buff []byte = make([]byte, 0, s.sendBuffSize)
 		var err error
 		defer func() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
@@ -266,9 +299,8 @@ func (s *AsynSocket) sendloop() {
 			case <-s.die:
 				for len(s.sendReq) > 0 {
 					o := <-s.sendReq
-					if buff, err = s.packer.Pack(buff, o); nil != err {
-						s.onEncodeError(s, err)
-					} else if len(buff) >= maxSendBlockSize {
+					buff, _ = s.packer.Pack(buff, o)
+					if len(buff) >= maxSendBlockSize {
 						if nil != s.send(buff) {
 							return
 						} else {
@@ -282,15 +314,18 @@ func (s *AsynSocket) sendloop() {
 				}
 				return
 			case o := <-s.sendReq:
-				if buff, err = s.packer.Pack(buff, o); nil != err {
+				if buff, err = s.packer.Pack(buff, o); err != nil {
 					s.onEncodeError(s, err)
-				} else if len(buff) >= maxSendBlockSize || len(s.sendReq) == 0 {
+				}
+				l := len(buff)
+				if l >= maxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
 					if err = s.send(buff); nil != err {
 						s.Close(err)
 						return
 					}
-					if len(buff) > maxSendBlockSize*2 {
-						buff = make([]byte, 0, 4096)
+					s.sendAverage.add(l)
+					if cap(buff) > s.sendBuffSize && s.sendAverage.average < s.sendBuffSize {
+						buff = make([]byte, 0, s.sendBuffSize)
 					} else {
 						buff = buff[:0]
 					}
