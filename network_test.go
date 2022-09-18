@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gorilla "github.com/gorilla/websocket"
+	"github.com/sniperHW/network/poolPackBufferPolicy"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -244,6 +245,8 @@ func TestAsynSocket(t *testing.T) {
 
 	{
 
+		log.Println("TestAsynSocket:-----------------------------2------")
+
 		okChan := make(chan struct{})
 
 		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
@@ -291,6 +294,7 @@ func TestAsynSocket(t *testing.T) {
 				},
 				HandlePakcet: func(as *AsynSocket, packet interface{}) {
 				},
+				PackBufferPolicy: poolPackBufferPolicy.New(), //使用pool pack buffer
 			})
 
 			for i := 0; i < 100; i++ {
