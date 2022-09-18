@@ -25,12 +25,12 @@ type ObjPacker interface {
 	//
 	// Pack(buff []byte, o interface{}) ([]byte,error) {
 	//	if b,err := encode2Packet(o) {
-	//		return append(buff,b...),nil
+	//		return append(buff,b...)
 	//	} else {
-	//		return buff,err
+	//		return buff
 	//	}
 	//}
-	Pack([]byte, interface{}) ([]byte, error)
+	Pack([]byte, interface{}) []byte
 }
 
 type ReadAble interface {

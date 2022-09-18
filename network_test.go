@@ -176,6 +176,7 @@ func TestWebSocket(t *testing.T) {
 }
 
 func TestAsynSocket(t *testing.T) {
+	MaxSendBlockSize = 64
 	{
 
 		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
@@ -196,7 +197,10 @@ func TestAsynSocket(t *testing.T) {
 						},
 						HandlePakcet: func(as *AsynSocket, packet interface{}) {
 							log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
-							as.Send(packet)
+							if err := as.Send(packet, -1); nil != err {
+								as.Close(err)
+								return
+							}
 							as.Recv(time.Second)
 						},
 					})
@@ -304,7 +308,7 @@ func TestAsynSocket(t *testing.T) {
 			})
 
 			for i := 0; i < 100; i++ {
-				as.Send([]byte("hello"))
+				as.Send([]byte("hello"), time.Second)
 			}
 
 			as.Close(nil)

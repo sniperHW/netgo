@@ -3,12 +3,13 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/golang/protobuf/proto"
-	"github.com/sniperHW/network"
 	"log"
 	"net"
 	"sync/atomic"
 	"time"
+
+	"github.com/golang/protobuf/proto"
+	"github.com/sniperHW/network"
 )
 
 type PBDecoder struct {
@@ -26,17 +27,17 @@ func (d *PBDecoder) Decode(b []byte) (interface{}, error) {
 type PBPacker struct {
 }
 
-func (e *PBPacker) Pack(b []byte, o interface{}) ([]byte, error) {
+func (e *PBPacker) Pack(b []byte, o interface{}) []byte {
 	if _, ok := o.(*Echo); !ok {
-		return b, errors.New("unsupport object")
+		return b
 	} else {
 		if data, err := proto.Marshal(o.(*Echo)); nil != err {
-			return b, err
+			return b
 		} else {
 			bu := make([]byte, 4)
 			binary.BigEndian.PutUint32(bu, uint32(len(data)))
 			b = append(b, bu...)
-			return append(b, data...), nil
+			return append(b, data...)
 		}
 	}
 }

@@ -18,6 +18,8 @@ var (
 	ErrSendBusy        error = errors.New("ErrSendBusy")
 )
 
+var MaxSendBlockSize int = 65535
+
 type AsynSocketOption struct {
 	Decoder          ObjDecoder
 	Packer           ObjPacker
@@ -25,7 +27,6 @@ type AsynSocketOption struct {
 	SendChanSize     int
 	HandlePakcet     func(*AsynSocket, interface{})
 	OnRecvTimeout    func(*AsynSocket)
-	OnEncodeError    func(*AsynSocket, error)
 	AsyncSendTimeout time.Duration
 	PackBuffer       PackBuffer
 }
@@ -33,11 +34,11 @@ type AsynSocketOption struct {
 type defaultPacker struct {
 }
 
-func (de *defaultPacker) Pack(buff []byte, o interface{}) ([]byte, error) {
+func (de *defaultPacker) Pack(buff []byte, o interface{}) []byte {
 	if b, ok := o.([]byte); ok {
-		return append(buff, b...), nil
+		return append(buff, b...)
 	} else {
-		return buff, errors.New("o should be []byte")
+		return buff
 	}
 }
 
@@ -64,13 +65,15 @@ type PackBuffer interface {
 	//pack完成后,将更新后的缓冲区交给PackBuffer更新内部缓冲区
 	//
 	//下次再调用GetBuffer将返回更新后的缓冲区
-	OnUpdate([]byte)
+	OnUpdate([]byte) []byte
 
 	//buff使用完毕后释放
 	ReleaseBuffer()
 
 	//sender退出时调用，如果内部buff是从pool获取的,Clear应该将buff归还pool
 	Clear()
+
+	ResetBuffer()
 }
 
 //asynchronize encapsulation for Socket
@@ -89,7 +92,6 @@ type AsynSocket struct {
 	doCloseOnce      sync.Once
 	closeCallBack    func(*AsynSocket, error) //call when routineCount trun to zero
 	handlePakcet     func(*AsynSocket, interface{})
-	onEncodeError    func(*AsynSocket, error)
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
 	packBuffer       PackBuffer
@@ -117,7 +119,6 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		recvReq:          make(chan time.Time, 1),
 		handlePakcet:     option.HandlePakcet,
 		asyncSendTimeout: option.AsyncSendTimeout,
-		onEncodeError:    option.OnEncodeError,
 		onRecvTimeout:    option.OnRecvTimeout,
 		packBuffer:       option.PackBuffer,
 	}
@@ -130,10 +131,6 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	}
 	if nil == s.closeCallBack {
 		s.closeCallBack = func(*AsynSocket, error) {
-		}
-	}
-	if nil == s.onEncodeError {
-		s.onEncodeError = func(*AsynSocket, error) {
 		}
 	}
 	if nil == s.onRecvTimeout {
@@ -286,7 +283,6 @@ func (s *AsynSocket) send(buff []byte) error {
 }
 
 func (s *AsynSocket) sendloop() {
-	const maxSendBlockSize int = 65535
 	atomic.AddInt32(&s.routineCount, 1)
 	go func() {
 		var err error
@@ -299,36 +295,26 @@ func (s *AsynSocket) sendloop() {
 		for {
 			select {
 			case <-s.die:
-				var buff []byte
 				for len(s.sendReq) > 0 {
 					o := <-s.sendReq
-					buff = s.packBuffer.GetBuffer()
-					buff, _ = s.packer.Pack(buff, o)
-					s.packBuffer.OnUpdate(buff)
-					if len(buff) >= maxSendBlockSize {
+					buff := s.packBuffer.OnUpdate(s.packer.Pack(s.packBuffer.GetBuffer(), o))
+					if len(buff) >= MaxSendBlockSize {
 						if s.send(buff) != nil {
 							return
 						} else {
-							s.packBuffer.ReleaseBuffer()
+							s.packBuffer.ResetBuffer()
 						}
 					}
 				}
 
-				if len(buff) > 0 {
-					if s.send(buff) != nil {
-						s.packBuffer.ReleaseBuffer()
-					}
+				if buff := s.packBuffer.GetBuffer(); len(buff) > 0 {
+					s.send(buff)
 				}
 				return
 			case o := <-s.sendReq:
-				buff := s.packBuffer.GetBuffer()
-				if buff, err = s.packer.Pack(buff, o); err != nil {
-					s.onEncodeError(s, err)
-				} else {
-					s.packBuffer.OnUpdate((buff))
-				}
+				buff := s.packBuffer.OnUpdate(s.packer.Pack(s.packBuffer.GetBuffer(), o))
 				l := len(buff)
-				if l >= maxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
+				if l >= MaxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
 					if err = s.send(buff); nil != err {
 						s.Close(err)
 						return

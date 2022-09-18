@@ -8,11 +8,12 @@ func New() *poolbuff {
 	return &poolbuff{}
 }
 
-func (d *poolbuff) OnUpdate(buff []byte) {
+func (d *poolbuff) OnUpdate(buff []byte) []byte {
 	if nil == d.buff {
 		panic("nil == d.buff")
 	}
 	d.buff = &buff
+	return (*d.buff)
 }
 
 func (d *poolbuff) ReleaseBuffer() {
@@ -29,6 +30,13 @@ func (d *poolbuff) GetBuffer() []byte {
 		d.buff = &buff
 	}
 	return *d.buff
+}
+
+func (d *poolbuff) ResetBuffer() {
+	if nil == d.buff {
+		panic("nil == d.buff")
+	}
+	(*d.buff) = (*d.buff)[:0]
 }
 
 func (d *poolbuff) Clear() {
