@@ -1,4 +1,4 @@
-package poolPackBufferPolicy
+package poolbuff
 
 import (
 	"sort"

@@ -27,7 +27,7 @@ type AsynSocketOption struct {
 	OnRecvTimeout    func(*AsynSocket)
 	OnEncodeError    func(*AsynSocket, error)
 	AsyncSendTimeout time.Duration
-	PackBufferPolicy PackBufferPolicy
+	PackBuffer       PackBuffer
 }
 
 type defaultPacker struct {
@@ -50,25 +50,27 @@ func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
 	return packet, nil
 }
 
-//pack缓冲策略，为了减少系统调用Send的次数，sender从sendReq获取尽量多的待发送对象
+//每发送一个对象，都将产生一次Send系统调用，对于大量小对象的情况将严重影响效率
 //
-//将对象pack到单一的缓冲区中，然后一次性将缓冲区发送出去
-type PackBufferPolicy interface {
+//更合理做法是提供一个缓冲区，将待发送对象pack到缓冲区中，当缓冲区累积到一定数量
+//
+//或后面没有待发送对象，再一次情况将整个缓冲区交给Send
+//
+//PackBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现PackBuffer
+type PackBuffer interface {
 	//pack用的缓冲区
 	GetBuffer() []byte
 
-	//pack完成后,将更新后的缓冲区交给PackBufferPolicy更新内部缓冲区
+	//pack完成后,将更新后的缓冲区交给PackBuffer更新内部缓冲区
 	//
 	//下次再调用GetBuffer将返回更新后的缓冲区
 	OnUpdate([]byte)
 
-	//发送成功后调用，传入成功发送的字节数量
-	//
-	//PackBufferPolicy重置缓冲区
-	OnSendOK(int)
+	//buff使用完毕后释放
+	ReleaseBuffer()
 
-	//sender退出时调用，如果内部buff是从pool获取的,OnSenderExit应该将buff归还pool
-	OnSenderExit()
+	//sender退出时调用，如果内部buff是从pool获取的,Clear应该将buff归还pool
+	Clear()
 }
 
 type movingAverage struct {
@@ -94,21 +96,25 @@ func (ma *movingAverage) add(v int) {
 	ma.average = ma.total / ma.wc
 }
 
-//默认PackBufferPolicy
+//默认PackBuffer
 //
-//使用预先分配的initBuffSize大小的buff
-type defalutPackBufferPolicy struct {
+//使用一个初始大小创建缓冲区，每次使用时将这个缓冲区返回
+//
+//随着使用缓冲区可能会超过初始大小，通过移动平均值计算过去一段时间内的buff使用量
+//
+//当移动平均值下降，收缩buff
+type defalutPackBuffer struct {
 	average      movingAverage
 	initBuffSize int
 	buff         []byte
 }
 
-func (d *defalutPackBufferPolicy) OnUpdate(buff []byte) {
+func (d *defalutPackBuffer) OnUpdate(buff []byte) {
 	d.buff = buff
 }
 
-func (d *defalutPackBufferPolicy) OnSendOK(n int) {
-	d.average.add(n)
+func (d *defalutPackBuffer) ReleaseBuffer() {
+	d.average.add(len(d.buff))
 	if cap(d.buff) > d.initBuffSize && d.average.average < d.initBuffSize {
 		//如果buff的容量超过了initBuffSize，且最近buff用量的移动平均数小于initBuffSize
 		//用initBuffSize收缩buff的大小,避免占用大量未被使用的内存空间
@@ -118,12 +124,11 @@ func (d *defalutPackBufferPolicy) OnSendOK(n int) {
 	}
 }
 
-func (d *defalutPackBufferPolicy) GetBuffer() []byte {
+func (d *defalutPackBuffer) GetBuffer() []byte {
 	return d.buff
 }
 
-func (d *defalutPackBufferPolicy) OnSenderExit() {
-
+func (d *defalutPackBuffer) Clear() {
 }
 
 //asynchronize encapsulation for Socket
@@ -145,7 +150,7 @@ type AsynSocket struct {
 	onEncodeError    func(*AsynSocket, error)
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
-	packBufferPolicy PackBufferPolicy
+	packBuffer       PackBuffer
 }
 
 func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) {
@@ -172,7 +177,7 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		asyncSendTimeout: option.AsyncSendTimeout,
 		onEncodeError:    option.OnEncodeError,
 		onRecvTimeout:    option.OnRecvTimeout,
-		packBufferPolicy: option.PackBufferPolicy,
+		packBuffer:       option.PackBuffer,
 	}
 
 	if nil == s.decoder {
@@ -194,8 +199,8 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 			s.Close(ErrRecvTimeout)
 		}
 	}
-	if nil == s.packBufferPolicy {
-		s.packBufferPolicy = &defalutPackBufferPolicy{
+	if nil == s.packBuffer {
+		s.packBuffer = &defalutPackBuffer{
 			initBuffSize: 1024,
 			buff:         make([]byte, 0, 1024),
 			average: movingAverage{
@@ -353,7 +358,7 @@ func (s *AsynSocket) sendloop() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
 				s.doClose()
 			}
-			s.packBufferPolicy.OnSenderExit()
+			s.packBuffer.Clear()
 		}()
 		for {
 			select {
@@ -361,30 +366,30 @@ func (s *AsynSocket) sendloop() {
 				var buff []byte
 				for len(s.sendReq) > 0 {
 					o := <-s.sendReq
-					buff = s.packBufferPolicy.GetBuffer()
+					buff = s.packBuffer.GetBuffer()
 					buff, _ = s.packer.Pack(buff, o)
-					s.packBufferPolicy.OnUpdate(buff)
+					s.packBuffer.OnUpdate(buff)
 					if len(buff) >= maxSendBlockSize {
 						if s.send(buff) != nil {
 							return
 						} else {
-							s.packBufferPolicy.OnSendOK(len(buff))
+							s.packBuffer.ReleaseBuffer()
 						}
 					}
 				}
 
 				if len(buff) > 0 {
 					if s.send(buff) != nil {
-						s.packBufferPolicy.OnSendOK(len(buff))
+						s.packBuffer.ReleaseBuffer()
 					}
 				}
 				return
 			case o := <-s.sendReq:
-				buff := s.packBufferPolicy.GetBuffer()
+				buff := s.packBuffer.GetBuffer()
 				if buff, err = s.packer.Pack(buff, o); err != nil {
 					s.onEncodeError(s, err)
 				} else {
-					s.packBufferPolicy.OnUpdate((buff))
+					s.packBuffer.OnUpdate((buff))
 				}
 				l := len(buff)
 				if l >= maxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
@@ -392,7 +397,7 @@ func (s *AsynSocket) sendloop() {
 						s.Close(err)
 						return
 					}
-					s.packBufferPolicy.OnSendOK(l)
+					s.packBuffer.ReleaseBuffer()
 				}
 			}
 		}

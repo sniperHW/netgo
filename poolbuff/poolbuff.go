@@ -1,21 +1,21 @@
-package poolPackBufferPolicy
+package poolbuff
 
-type policy struct {
+type poolbuff struct {
 	buff *[]byte
 }
 
-func New() *policy {
-	return &policy{}
+func New() *poolbuff {
+	return &poolbuff{}
 }
 
-func (d *policy) OnUpdate(buff []byte) {
+func (d *poolbuff) OnUpdate(buff []byte) {
 	if nil == d.buff {
 		panic("nil == d.buff")
 	}
 	d.buff = &buff
 }
 
-func (d *policy) OnSendOK(n int) {
+func (d *poolbuff) ReleaseBuffer() {
 	if nil == d.buff {
 		panic("nil == d.buff")
 	}
@@ -23,7 +23,7 @@ func (d *policy) OnSendOK(n int) {
 	d.buff = nil
 }
 
-func (d *policy) GetBuffer() []byte {
+func (d *poolbuff) GetBuffer() []byte {
 	if nil == d.buff {
 		buff := get()
 		d.buff = &buff
@@ -31,7 +31,7 @@ func (d *policy) GetBuffer() []byte {
 	return *d.buff
 }
 
-func (d *policy) OnSenderExit() {
+func (d *poolbuff) Clear() {
 	if nil != d.buff {
 		put(*d.buff)
 		d.buff = nil

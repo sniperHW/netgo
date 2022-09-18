@@ -1,4 +1,4 @@
-package poolPackBufferPolicy
+package poolbuff
 
 //go test -race -covermode=atomic -v -coverprofile=coverage.out -run=.
 //go tool cover -html=coverage.out
@@ -9,22 +9,22 @@ import (
 )
 
 func TestPolycy(t *testing.T) {
-	policy := New()
-	buff := policy.GetBuffer()
+	poolbuff := New()
+	buff := poolbuff.GetBuffer()
 	assert.Equal(t, 0, len(buff))
 
 	buff = append(buff, []byte("hello")...)
 
-	policy.OnUpdate(buff)
+	poolbuff.OnUpdate(buff)
 
-	buff = policy.GetBuffer()
+	buff = poolbuff.GetBuffer()
 	assert.Equal(t, 5, len(buff))
 
-	policy.OnSendOK(len(buff))
+	poolbuff.ReleaseBuffer()
 
-	buff = policy.GetBuffer()
+	buff = poolbuff.GetBuffer()
 	assert.Equal(t, 0, len(buff))
 
-	policy.OnSenderExit()
+	poolbuff.ReleaseBuffer()
 
 }
