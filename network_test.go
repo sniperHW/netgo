@@ -12,10 +12,17 @@ import (
 	"time"
 
 	gorilla "github.com/gorilla/websocket"
-	"github.com/sniperHW/network/poolbuff"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+func TestPow(t *testing.T) {
+	log.Println(powOf2)
+	log.Println(UpperBoundOfPowTwo(0))
+	log.Println(UpperBoundOfPowTwo(1))
+	log.Println(UpperBoundOfPowTwo(60))
+	log.Println(UpperBoundOfPowTwo(127))
+}
 
 func TestKcpSocket(t *testing.T) {
 	key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
@@ -294,7 +301,6 @@ func TestAsynSocket(t *testing.T) {
 				},
 				HandlePakcet: func(as *AsynSocket, packet interface{}) {
 				},
-				PackBuffer: poolbuff.New(), //使用pool pack buffer
 			})
 
 			for i := 0; i < 100; i++ {

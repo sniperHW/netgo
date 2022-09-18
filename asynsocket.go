@@ -2,12 +2,12 @@ package network
 
 import (
 	"errors"
-
-	//"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sniperHW/network/poolbuff"
 )
 
 var (
@@ -71,64 +71,6 @@ type PackBuffer interface {
 
 	//sender退出时调用，如果内部buff是从pool获取的,Clear应该将buff归还pool
 	Clear()
-}
-
-type movingAverage struct {
-	head    int
-	window  []int
-	total   int
-	wc      int
-	average int
-}
-
-func (ma *movingAverage) add(v int) {
-	if ma.wc < len(ma.window) {
-		//窗口没有填满
-		ma.window[ma.head] = v
-		ma.head = (ma.head + 1) % len(ma.window)
-		ma.wc++
-	} else {
-		ma.total -= ma.window[ma.head]
-		ma.window[ma.head] = v
-		ma.head = (ma.head + 1) % len(ma.window)
-	}
-	ma.total += v
-	ma.average = ma.total / ma.wc
-}
-
-//默认PackBuffer
-//
-//使用一个初始大小创建缓冲区，每次使用时将这个缓冲区返回
-//
-//随着使用缓冲区可能会超过初始大小，通过移动平均值计算过去一段时间内的buff使用量
-//
-//当移动平均值下降，收缩buff
-type defalutPackBuffer struct {
-	average      movingAverage
-	initBuffSize int
-	buff         []byte
-}
-
-func (d *defalutPackBuffer) OnUpdate(buff []byte) {
-	d.buff = buff
-}
-
-func (d *defalutPackBuffer) ReleaseBuffer() {
-	d.average.add(len(d.buff))
-	if cap(d.buff) > d.initBuffSize && d.average.average < d.initBuffSize {
-		//如果buff的容量超过了initBuffSize，且最近buff用量的移动平均数小于initBuffSize
-		//用initBuffSize收缩buff的大小,避免占用大量未被使用的内存空间
-		d.buff = make([]byte, 0, d.initBuffSize)
-	} else {
-		d.buff = d.buff[:0]
-	}
-}
-
-func (d *defalutPackBuffer) GetBuffer() []byte {
-	return d.buff
-}
-
-func (d *defalutPackBuffer) Clear() {
 }
 
 //asynchronize encapsulation for Socket
@@ -200,13 +142,7 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		}
 	}
 	if nil == s.packBuffer {
-		s.packBuffer = &defalutPackBuffer{
-			initBuffSize: 1024,
-			buff:         make([]byte, 0, 1024),
-			average: movingAverage{
-				window: make([]int, 10),
-			},
-		}
+		s.packBuffer = poolbuff.New()
 	}
 
 	if option.SendChanSize > 0 {
