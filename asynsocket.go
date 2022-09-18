@@ -105,7 +105,7 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	}
 
 	if option.SendChanSize <= 0 {
-		option.SendChanSize = 1
+		option.SendChanSize = 0
 	}
 
 	s := &AsynSocket{
@@ -115,7 +115,6 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		closeCallBack:    option.CloseCallBack,
 		die:              make(chan struct{}),
 		recvReq:          make(chan time.Time, 1),
-		sendReq:          make(chan interface{}, option.SendChanSize),
 		handlePakcet:     option.HandlePakcet,
 		asyncSendTimeout: option.AsyncSendTimeout,
 		onEncodeError:    option.OnEncodeError,
@@ -145,6 +144,12 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 			s.Close(ErrRecvTimeout)
 		}
 	}
+	if option.SendChanSize > 0 {
+		s.sendReq = make(chan interface{}, option.SendChanSize)
+	} else {
+		s.sendReq = make(chan interface{})
+	}
+
 	if s.sendBuffSize <= 0 {
 		s.sendBuffSize = 1024
 	}
