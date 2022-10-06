@@ -1,13 +1,13 @@
 package network
 
 import (
+	"context"
 	"errors"
+	"github.com/sniperHW/network/poolbuff"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/sniperHW/network/poolbuff"
 )
 
 var (
@@ -15,7 +15,6 @@ var (
 	ErrSendTimeout     error = errors.New("SendTimeout")
 	ErrAsynSendTimeout error = errors.New("ErrAsynSendTimeout")
 	ErrSocketClosed    error = errors.New("SocketClosed")
-	ErrSendBusy        error = errors.New("ErrSendBusy")
 )
 
 var MaxSendBlockSize int = 65535
@@ -203,14 +202,6 @@ func (s *AsynSocket) Close(err error) {
 	})
 }
 
-func (s *AsynSocket) getTimeout(timeout []time.Duration) time.Duration {
-	if len(timeout) > 0 {
-		return timeout[0]
-	} else {
-		return 0
-	}
-}
-
 // send a asynchronize recv request
 //
 // if there is a packet received before timeout,handlePakcet would be call with packet as a parameter
@@ -218,15 +209,15 @@ func (s *AsynSocket) getTimeout(timeout []time.Duration) time.Duration {
 // if recevie timeout,on onReceTimeout would be call
 //
 // if recvReq is full,drop the request
-func (s *AsynSocket) Recv(timeout ...time.Duration) {
+func (s *AsynSocket) Recv(deadline ...time.Time) {
 	s.recvOnce.Do(s.recvloop)
-	deadline := time.Time{}
-	if t := s.getTimeout(timeout); t > 0 {
-		deadline = time.Now().Add(t)
+	d := time.Time{}
+	if len(deadline) > 0 {
+		d = deadline[0]
 	}
 	select {
 	case <-s.die:
-	case s.recvReq <- deadline:
+	case s.recvReq <- d:
 	default:
 	}
 }
@@ -333,9 +324,24 @@ func (s *AsynSocket) sendloop() {
 	}()
 }
 
-func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
+func (s *AsynSocket) getTimeout(deadline []time.Time) time.Duration {
+	if len(deadline) > 0 {
+		if deadline[0].IsZero() {
+			return -1
+		} else {
+			return deadline[0].Sub(time.Now())
+		}
+	} else {
+		return 0
+	}
+}
+
+//deadline: 如果不传递，当发送chan满一直等待
+//deadline.IsZero() || deadline.Before(time.Now):当chan满立即返回ErrSendBusy
+//否则当发送chan满等待到deadline,返回ErrSendTimeout
+func (s *AsynSocket) Send(o interface{}, deadline ...time.Time) error {
 	s.sendOnce.Do(s.sendloop)
-	if t := s.getTimeout(timeout); t == 0 {
+	if timeout := s.getTimeout(deadline); timeout == 0 {
 		//if senReq has no space wait forever
 		select {
 		case <-s.die:
@@ -343,9 +349,9 @@ func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
 		case s.sendReq <- o:
 			return nil
 		}
-	} else if t > 0 {
+	} else if timeout > 0 {
 		//if sendReq has no space,wait until deadline
-		ticker := time.NewTicker(t)
+		ticker := time.NewTicker(timeout)
 		defer ticker.Stop()
 		select {
 		case <-s.die:
@@ -363,7 +369,19 @@ func (s *AsynSocket) Send(o interface{}, timeout ...time.Duration) error {
 		case s.sendReq <- o:
 			return nil
 		default:
-			return ErrSendBusy
+			return ErrSendTimeout
 		}
+	}
+}
+
+func (s *AsynSocket) SendWithContext(ctx context.Context, o interface{}) error {
+	s.sendOnce.Do(s.sendloop)
+	select {
+	case <-s.die:
+		return ErrSocketClosed
+	case s.sendReq <- o:
+		return nil
+	case <-ctx.Done():
+		return ctx.Error()
 	}
 }

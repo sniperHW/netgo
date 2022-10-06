@@ -195,13 +195,13 @@ func TestAsynSocket(t *testing.T) {
 						log.Println("TestAsynSocket: server closed err:", err)
 					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
 						log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
-						if err := as.Send(packet, -1); nil != err {
+						if err := as.Send(packet); nil != err {
 							as.Close(err)
 							return
 						}
-						as.Recv(time.Second)
+						as.Recv(time.Now().Add(time.Second))
 					})
-					as.Recv(time.Second)
+					as.Recv(time.Now().Add(time.Second))
 				}
 			}
 		}()
@@ -273,10 +273,10 @@ func TestAsynSocket(t *testing.T) {
 						if i == 100*5 {
 							close(okChan)
 						} else {
-							as.Recv(time.Second)
+							as.Recv(time.Now().Add(time.Second))
 						}
 					})
-					as.Recv(time.Second)
+					as.Recv(time.Now().Add(time.Second))
 				}
 			}
 		}()
