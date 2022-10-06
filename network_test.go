@@ -43,7 +43,7 @@ func TestKcpSocket(t *testing.T) {
 
 				log.Println("TestKcpSocket:on new client")
 
-				s, _ := NewKcpSocket(conn)
+				s := NewKcpSocket(conn)
 				go func() {
 					for {
 						packet, err := s.Recv()
@@ -67,7 +67,7 @@ func TestKcpSocket(t *testing.T) {
 		block, _ := kcp.NewAESBlockCrypt(key)
 		// dial to the echo server
 		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-			s, _ := NewKcpSocket(conn)
+			s := NewKcpSocket(conn)
 
 			s.Send([]byte("hello"))
 
@@ -107,7 +107,7 @@ func TestWebSocket(t *testing.T) {
 			})
 
 			log.Println("TestWebSocket:on client")
-			s, _ := NewWebSocket(conn)
+			s := NewWebSocket(conn)
 			go func() {
 				for {
 					packet, err := s.Recv()
@@ -133,7 +133,7 @@ func TestWebSocket(t *testing.T) {
 			conn, _, _ := dialer.Dial(u.String(), nil)
 
 			respChan := make(chan struct{})
-			s, _ := NewWebSocket(conn)
+			s := NewWebSocket(conn)
 
 			conn.WriteMessage(gorilla.PingMessage, []byte("hello"))
 
@@ -159,7 +159,7 @@ func TestWebSocket(t *testing.T) {
 
 			conn, _, _ := dialer.Dial(u.String(), nil)
 
-			s, _ := NewWebSocket(conn)
+			s := NewWebSocket(conn)
 
 			s.Send([]byte("hello"))
 
@@ -190,8 +190,10 @@ func TestAsynSocket(t *testing.T) {
 					return
 				} else {
 					log.Println("TestAsynSocket: on client")
-					s, _ := NewTcpSocket(conn)
-					as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+					NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
+						AutoRecv:        true,
+						AutoRecvTimeout: time.Second,
+					}).SetCloseCallback(func(_ *AsynSocket, err error) {
 						log.Println("TestAsynSocket: server closed err:", err)
 					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
 						log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
@@ -199,9 +201,7 @@ func TestAsynSocket(t *testing.T) {
 							as.Close(err)
 							return
 						}
-						as.Recv(time.Now().Add(time.Second))
-					})
-					as.Recv(time.Now().Add(time.Second))
+					}).Recv(time.Now().Add(time.Second))
 				}
 			}
 		}()
@@ -212,17 +212,14 @@ func TestAsynSocket(t *testing.T) {
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
-			s, _ := NewTcpSocket(conn)
-
 			okChan := make(chan struct{})
 
-			as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket: client closed err:", err)
 			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
 				log.Println("TestAsynSocket: client", string(packet.([]byte)))
 				close(okChan)
-			})
-			as.Recv()
+			}).Recv()
 			log.Println("TestAsynSocket: send", as.Send([]byte("hello")))
 			<-okChan
 			as.Close(nil)
@@ -232,13 +229,11 @@ func TestAsynSocket(t *testing.T) {
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
-			s, _ := NewTcpSocket(conn)
 			okChan := make(chan struct{})
-			as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket:client closed err:", err)
 				close(okChan)
-			})
-			as.Recv()
+			}).Recv()
 			<-okChan
 			as.Close(nil)
 		}
@@ -264,8 +259,7 @@ func TestAsynSocket(t *testing.T) {
 				} else {
 					log.Println("TestAsynSocket:on client")
 					i := 0
-					s, _ := NewTcpSocket(conn)
-					as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+					NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 						log.Println("TestAsynSocket:server closed err:", err)
 					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
 						i = i + len(packet.([]byte))
@@ -275,8 +269,7 @@ func TestAsynSocket(t *testing.T) {
 						} else {
 							as.Recv(time.Now().Add(time.Second))
 						}
-					})
-					as.Recv(time.Now().Add(time.Second))
+					}).Recv(time.Now().Add(time.Second))
 				}
 			}
 		}()
@@ -285,14 +278,14 @@ func TestAsynSocket(t *testing.T) {
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
-			s, _ := NewTcpSocket(conn)
-
-			as := NewAsynSocket(s, AsynSocketOption{SendChanSize: 1000}).SetCloseCallback(func(_ *AsynSocket, err error) {
+			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
+				SendChanSize: 1000,
+			}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket:client closed err:", err)
 			})
 
 			for i := 0; i < 100; i++ {
-				as.Send([]byte("hello"), time.Second)
+				as.Send([]byte("hello"), time.Now().Add(time.Second))
 			}
 
 			as.Close(nil)
@@ -319,7 +312,7 @@ func TestTCPSocket(t *testing.T) {
 					return
 				} else {
 					log.Println("TestTCPSocket:on client")
-					s, _ := NewTcpSocket(conn)
+					s := NewTcpSocket(conn.(*net.TCPConn))
 					go func() {
 						for {
 							packet, err := s.Recv(time.Now().Add(time.Second))
@@ -339,7 +332,7 @@ func TestTCPSocket(t *testing.T) {
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
-			s, _ := NewTcpSocket(conn)
+			s := NewTcpSocket(conn.(*net.TCPConn))
 			s.Send([]byte("hello"))
 			packet, err := s.Recv()
 			log.Println("TestTCPSocket:client", string(packet), err)
@@ -348,7 +341,7 @@ func TestTCPSocket(t *testing.T) {
 
 		{
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
-			s, _ := NewTcpSocket(conn)
+			s := NewTcpSocket(conn.(*net.TCPConn))
 			packet, err := s.Recv()
 			log.Println("TestTCPSocket:client", string(packet), err)
 			s.Close()

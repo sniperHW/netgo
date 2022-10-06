@@ -1,7 +1,6 @@
 package network
 
 import (
-	"errors"
 	"github.com/xtaci/kcp-go/v5"
 	"net"
 	"runtime"
@@ -69,11 +68,7 @@ func (kc *kcpSocket) Recv(deadline ...time.Time) ([]byte, error) {
 	}
 }
 
-func NewKcpSocket(conn *kcp.UDPSession, packetReceiver ...PacketReceiver) (Socket, error) {
-	if nil == conn {
-		return nil, errors.New("conn is nil")
-	}
-
+func NewKcpSocket(conn *kcp.UDPSession, packetReceiver ...PacketReceiver) Socket {
 	s := &kcpSocket{
 		conn: conn,
 	}
@@ -88,5 +83,5 @@ func NewKcpSocket(conn *kcp.UDPSession, packetReceiver ...PacketReceiver) (Socke
 		s.Close()
 	})
 
-	return s, nil
+	return s
 }

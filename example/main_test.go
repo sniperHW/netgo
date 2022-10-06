@@ -20,16 +20,16 @@ import (
 
 func serverSocket(s network.Socket) {
 	log.Println("on new client")
-	as := network.NewAsynSocket(s, network.AsynSocketOption{
-		Decoder: &PBDecoder{},
-		Packer:  &PBPacker{},
+	network.NewAsynSocket(s, network.AsynSocketOption{
+		Decoder:         &PBDecoder{},
+		Packer:          &PBPacker{},
+		AutoRecv:        true,
+		AutoRecvTimeout: time.Second,
 	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
 		log.Println("server closed err:", err)
 	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
 		as.Send(packet)
-		as.Recv(time.Second)
-	})
-	as.Recv(time.Second)
+	}).Recv(time.Now().Add(time.Second))
 }
 
 func clientSocket(s network.Socket) {
@@ -47,9 +47,7 @@ func clientSocket(s network.Socket) {
 		} else {
 			as.Recv()
 		}
-	})
-
-	as.Recv()
+	}).Recv()
 	for i := 0; i < 100; i++ {
 		as.Send(&Echo{Msg: proto.String("hello")})
 	}
@@ -74,8 +72,7 @@ func TestEchoKCP(t *testing.T) {
 				if err != nil {
 					return
 				}
-				s, _ := network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-				serverSocket(s)
+				serverSocket(network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 			}
 		}()
 	} else {
@@ -88,8 +85,7 @@ func TestEchoKCP(t *testing.T) {
 		block, _ := kcp.NewAESBlockCrypt(key)
 		// dial to the echo server
 		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-			s, _ := network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-			clientSocket(s)
+			clientSocket(network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 		} else {
 			log.Fatal(err)
 		}
@@ -111,8 +107,7 @@ func TestEchoTCP(t *testing.T) {
 				return
 			} else {
 				log.Println("on client")
-				s, _ := network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-				serverSocket(s)
+				serverSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
 			}
 		}
 	}()
@@ -121,8 +116,7 @@ func TestEchoTCP(t *testing.T) {
 
 	{
 		conn, _ := dialer.Dial("tcp", "localhost:8110")
-		s, _ := network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-		clientSocket(s)
+		clientSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
 	}
 
 	listener.Close()
@@ -143,8 +137,7 @@ func TestEchoWebSocket(t *testing.T) {
 	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		conn, _ := upgrader.Upgrade(w, r, nil)
 		log.Println("on client")
-		s, _ := network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-		serverSocket(s)
+		serverSocket(network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 	})
 
 	go func() {
@@ -156,8 +149,7 @@ func TestEchoWebSocket(t *testing.T) {
 
 	{
 		conn, _, _ := dialer.Dial(u.String(), nil)
-		s, _ := network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-		clientSocket(s)
+		clientSocket(network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 	}
 
 	listener.Close()

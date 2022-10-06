@@ -25,6 +25,8 @@ type AsynSocketOption struct {
 	SendChanSize     int
 	AsyncSendTimeout time.Duration
 	PackBuffer       PackBuffer
+	AutoRecv         bool          //处理完packet后自动调用Recv
+	AutoRecvTimeout  time.Duration //自动调用Recv时的超时时间
 }
 
 type defaultPacker struct {
@@ -91,6 +93,8 @@ type AsynSocket struct {
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
 	packBuffer       PackBuffer
+	autoRecv         bool
+	autoRecvTimeout  time.Duration
 }
 
 func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
@@ -108,6 +112,8 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 		sendReq:          make(chan interface{}, option.SendChanSize),
 		asyncSendTimeout: option.AsyncSendTimeout,
 		packBuffer:       option.PackBuffer,
+		autoRecv:         option.AutoRecv,
+		autoRecvTimeout:  option.AutoRecvTimeout,
 	}
 
 	if nil == s.decoder {
@@ -209,7 +215,7 @@ func (s *AsynSocket) Close(err error) {
 // if recevie timeout,on onReceTimeout would be call
 //
 // if recvReq is full,drop the request
-func (s *AsynSocket) Recv(deadline ...time.Time) {
+func (s *AsynSocket) Recv(deadline ...time.Time) *AsynSocket {
 	s.recvOnce.Do(s.recvloop)
 	d := time.Time{}
 	if len(deadline) > 0 {
@@ -220,6 +226,7 @@ func (s *AsynSocket) Recv(deadline ...time.Time) {
 	case s.recvReq <- d:
 	default:
 	}
+	return s
 }
 
 func (s *AsynSocket) recvloop() {
@@ -257,6 +264,13 @@ func (s *AsynSocket) recvloop() {
 							s.onRecvTimeout(s)
 						} else {
 							s.Close(err)
+						}
+					}
+					if s.autoRecv {
+						if s.autoRecvTimeout > 0 {
+							s.Recv(time.Now().Add(s.autoRecvTimeout))
+						} else {
+							s.Recv()
 						}
 					}
 				}
@@ -382,6 +396,6 @@ func (s *AsynSocket) SendWithContext(ctx context.Context, o interface{}) error {
 	case s.sendReq <- o:
 		return nil
 	case <-ctx.Done():
-		return ctx.Error()
+		return ctx.Err()
 	}
 }

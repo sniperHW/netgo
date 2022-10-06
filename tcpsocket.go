@@ -1,7 +1,6 @@
 package network
 
 import (
-	"errors"
 	"net"
 	"runtime"
 	"sync"
@@ -12,7 +11,7 @@ import (
 type tcpSocket struct {
 	userData       atomic.Value
 	packetReceiver PacketReceiver
-	conn           net.Conn
+	conn           *net.TCPConn
 	closeOnce      sync.Once
 }
 
@@ -68,17 +67,7 @@ func (tc *tcpSocket) Recv(deadline ...time.Time) ([]byte, error) {
 	}
 }
 
-func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, error) {
-	if nil == conn {
-		return nil, errors.New("conn is nil")
-	}
-
-	switch conn.(type) {
-	case *net.TCPConn:
-	default:
-		return nil, errors.New("conn should be TCPConn")
-	}
-
+func NewTcpSocket(conn *net.TCPConn, packetReceiver ...PacketReceiver) Socket {
 	s := &tcpSocket{
 		conn: conn,
 	}
@@ -93,5 +82,5 @@ func NewTcpSocket(conn net.Conn, packetReceiver ...PacketReceiver) (Socket, erro
 		s.Close()
 	})
 
-	return s, nil
+	return s
 }

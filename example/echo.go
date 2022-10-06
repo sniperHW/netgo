@@ -118,15 +118,14 @@ func runLogicSvr() {
 			if err != nil {
 				return
 			} else {
-				s, _ := network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-				as := network.NewAsynSocket(s, network.AsynSocketOption{
-					Decoder: &PBDecoder{},
-					Packer:  &PBPacker{},
-				}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+				network.NewAsynSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
+					network.AsynSocketOption{
+						Decoder:  &PBDecoder{},
+						Packer:   &PBPacker{},
+						AutoRecv: true,
+					}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
 					as.Send(packet)
-					as.Recv()
-				})
-				as.Recv()
+				}).Recv()
 			}
 		}
 	}()
@@ -143,7 +142,7 @@ func runGateSvr() {
 				return
 			} else {
 				go func() {
-					cli, _ := network.NewTcpSocket(conn)
+					cli := network.NewTcpSocket(conn.(*net.TCPConn))
 					var (
 						logic network.Socket
 					)
@@ -152,7 +151,7 @@ func runGateSvr() {
 						if logicConn, err := dialer.Dial("tcp", logicService); nil != err {
 							time.Sleep(time.Second)
 						} else {
-							logic, _ = network.NewTcpSocket(logicConn)
+							logic = network.NewTcpSocket(logicConn.(*net.TCPConn))
 							break
 						}
 					}
@@ -210,7 +209,7 @@ func runClient() {
 		if conn, err := dialer.Dial("tcp", gateService); nil != err {
 			time.Sleep(time.Second)
 		} else {
-			s, _ = network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
+			s = network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)})
 			break
 		}
 	}
@@ -231,9 +230,8 @@ func runClient() {
 		} else {
 			as.Recv()
 		}
-	})
+	}).Recv()
 
-	as.Recv()
 	for i := 0; i < 100; i++ {
 		as.Send(&Echo{Msg: proto.String("hello")})
 	}

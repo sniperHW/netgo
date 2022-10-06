@@ -1,7 +1,6 @@
 package network
 
 import (
-	"errors"
 	gorilla "github.com/gorilla/websocket"
 	"net"
 	"runtime"
@@ -120,11 +119,7 @@ func (wc *webSocket) Recv(deadline ...time.Time) (packet []byte, err error) {
 	return
 }
 
-func NewWebSocket(conn *gorilla.Conn, packetReceiver ...PacketReceiver) (Socket, error) {
-	if nil == conn {
-		return nil, errors.New("conn is nil")
-	}
-
+func NewWebSocket(conn *gorilla.Conn, packetReceiver ...PacketReceiver) Socket {
 	s := &webSocket{
 		conn: conn,
 	}
@@ -140,5 +135,5 @@ func NewWebSocket(conn *gorilla.Conn, packetReceiver ...PacketReceiver) (Socket,
 		s.Close()
 	})
 
-	return s, nil
+	return s
 }
