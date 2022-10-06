@@ -119,13 +119,12 @@ func runLogicSvr() {
 				return
 			} else {
 				s, _ := network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)})
-				as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
-					HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
-						as.Send(packet)
-						as.Recv()
-					},
+				as := network.NewAsynSocket(s, network.AsynSocketOption{
 					Decoder: &PBDecoder{},
 					Packer:  &PBPacker{},
+				}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+					as.Send(packet)
+					as.Recv()
 				})
 				as.Recv()
 			}
@@ -219,22 +218,21 @@ func runClient() {
 	okChan := make(chan struct{})
 	count := int32(0)
 
-	as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
-		CloseCallBack: func(_ *network.AsynSocket, err error) {
-			log.Println("client closed err:", err)
-		},
-		HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
-			c := atomic.AddInt32(&count, 1)
-			log.Println("go echo resp", c)
-			if c == 100 {
-				close(okChan)
-			} else {
-				as.Recv()
-			}
-		},
+	as := network.NewAsynSocket(s, network.AsynSocketOption{
 		Decoder: &PBDecoder{},
 		Packer:  &PBPacker{},
+	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+		log.Println("client closed err:", err)
+	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+		c := atomic.AddInt32(&count, 1)
+		log.Println("go echo resp", c)
+		if c == 100 {
+			close(okChan)
+		} else {
+			as.Recv()
+		}
 	})
+
 	as.Recv()
 	for i := 0; i < 100; i++ {
 		as.Send(&Echo{Msg: proto.String("hello")})

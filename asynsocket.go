@@ -23,10 +23,7 @@ var MaxSendBlockSize int = 65535
 type AsynSocketOption struct {
 	Decoder          ObjDecoder
 	Packer           ObjPacker
-	CloseCallBack    func(*AsynSocket, error)
 	SendChanSize     int
-	HandlePakcet     func(*AsynSocket, interface{})
-	OnRecvTimeout    func(*AsynSocket)
 	AsyncSendTimeout time.Duration
 	PackBuffer       PackBuffer
 }
@@ -97,14 +94,7 @@ type AsynSocket struct {
 	packBuffer       PackBuffer
 }
 
-func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) {
-	if nil == socket {
-		return nil, errors.New("socket is nil")
-	}
-
-	if nil == option.HandlePakcet {
-		return nil, errors.New("HandlePakcet is nil")
-	}
+func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 
 	if option.SendChanSize <= 0 {
 		option.SendChanSize = 1
@@ -114,12 +104,10 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 		socket:           socket,
 		decoder:          option.Decoder,
 		packer:           option.Packer,
-		closeCallBack:    option.CloseCallBack,
 		die:              make(chan struct{}),
 		recvReq:          make(chan time.Time, 1),
-		handlePakcet:     option.HandlePakcet,
+		sendReq:          make(chan interface{}, option.SendChanSize),
 		asyncSendTimeout: option.AsyncSendTimeout,
-		onRecvTimeout:    option.OnRecvTimeout,
 		packBuffer:       option.PackBuffer,
 	}
 
@@ -129,26 +117,45 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) (*AsynSocket, error) 
 	if nil == s.packer {
 		s.packer = &defaultPacker{}
 	}
-	if nil == s.closeCallBack {
-		s.closeCallBack = func(*AsynSocket, error) {
-		}
+
+	s.closeCallBack = func(*AsynSocket, error) {
+
 	}
-	if nil == s.onRecvTimeout {
-		s.onRecvTimeout = func(*AsynSocket) {
-			s.Close(ErrRecvTimeout)
-		}
+
+	s.onRecvTimeout = func(*AsynSocket) {
+		s.Close(ErrRecvTimeout)
 	}
+
+	s.handlePakcet = func(*AsynSocket, interface{}) {
+		s.Recv()
+	}
+
 	if nil == s.packBuffer {
 		s.packBuffer = poolbuff.New()
 	}
 
-	if option.SendChanSize > 0 {
-		s.sendReq = make(chan interface{}, option.SendChanSize)
-	} else {
-		s.sendReq = make(chan interface{})
-	}
+	return s
+}
 
-	return s, nil
+func (s *AsynSocket) SetCloseCallback(closeCallBack func(*AsynSocket, error)) *AsynSocket {
+	if closeCallBack != nil {
+		s.closeCallBack = closeCallBack
+	}
+	return s
+}
+
+func (s *AsynSocket) SetRecvTimeoutCallback(onRecvTimeout func(*AsynSocket)) *AsynSocket {
+	if onRecvTimeout != nil {
+		s.onRecvTimeout = onRecvTimeout
+	}
+	return s
+}
+
+func (s *AsynSocket) SetPacketHandler(handlePakcet func(*AsynSocket, interface{})) *AsynSocket {
+	if handlePakcet != nil {
+		s.handlePakcet = handlePakcet
+	}
+	return s
 }
 
 func (s *AsynSocket) GetUnderSocket() Socket {

@@ -191,23 +191,22 @@ func TestAsynSocket(t *testing.T) {
 				} else {
 					log.Println("TestAsynSocket: on client")
 					s, _ := NewTcpSocket(conn)
-					as, _ := NewAsynSocket(s, AsynSocketOption{
-						CloseCallBack: func(_ *AsynSocket, err error) {
-							log.Println("TestAsynSocket: server closed err:", err)
-						},
-						HandlePakcet: func(as *AsynSocket, packet interface{}) {
-							log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
-							if err := as.Send(packet, -1); nil != err {
-								as.Close(err)
-								return
-							}
-							as.Recv(time.Second)
-						},
+					as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+						log.Println("TestAsynSocket: server closed err:", err)
+					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+						log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
+						if err := as.Send(packet, -1); nil != err {
+							as.Close(err)
+							return
+						}
+						as.Recv(time.Second)
 					})
 					as.Recv(time.Second)
 				}
 			}
 		}()
+
+		log.Println("here")
 
 		dialer := &net.Dialer{}
 
@@ -217,14 +216,11 @@ func TestAsynSocket(t *testing.T) {
 
 			okChan := make(chan struct{})
 
-			as, _ := NewAsynSocket(s, AsynSocketOption{
-				CloseCallBack: func(_ *AsynSocket, err error) {
-					log.Println("TestAsynSocket: client closed err:", err)
-				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}) {
-					log.Println("TestAsynSocket: client", string(packet.([]byte)))
-					close(okChan)
-				},
+			as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				log.Println("TestAsynSocket: client closed err:", err)
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+				log.Println("TestAsynSocket: client", string(packet.([]byte)))
+				close(okChan)
 			})
 			as.Recv()
 			log.Println("TestAsynSocket: send", as.Send([]byte("hello")))
@@ -238,13 +234,9 @@ func TestAsynSocket(t *testing.T) {
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
 			s, _ := NewTcpSocket(conn)
 			okChan := make(chan struct{})
-			as, _ := NewAsynSocket(s, AsynSocketOption{
-				CloseCallBack: func(_ *AsynSocket, err error) {
-					log.Println("TestAsynSocket:client closed err:", err)
-					close(okChan)
-				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}) {
-				},
+			as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				log.Println("TestAsynSocket:client closed err:", err)
+				close(okChan)
 			})
 			as.Recv()
 			<-okChan
@@ -273,19 +265,16 @@ func TestAsynSocket(t *testing.T) {
 					log.Println("TestAsynSocket:on client")
 					i := 0
 					s, _ := NewTcpSocket(conn)
-					as, _ := NewAsynSocket(s, AsynSocketOption{
-						CloseCallBack: func(_ *AsynSocket, err error) {
-							log.Println("TestAsynSocket:server closed err:", err)
-						},
-						HandlePakcet: func(as *AsynSocket, packet interface{}) {
-							i = i + len(packet.([]byte))
-							log.Println("TestAsynSocket:", i)
-							if i == 100*5 {
-								close(okChan)
-							} else {
-								as.Recv(time.Second)
-							}
-						},
+					as := NewAsynSocket(s, AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+						log.Println("TestAsynSocket:server closed err:", err)
+					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+						i = i + len(packet.([]byte))
+						log.Println("TestAsynSocket:", i)
+						if i == 100*5 {
+							close(okChan)
+						} else {
+							as.Recv(time.Second)
+						}
 					})
 					as.Recv(time.Second)
 				}
@@ -298,13 +287,8 @@ func TestAsynSocket(t *testing.T) {
 			conn, _ := dialer.Dial("tcp", "localhost:8110")
 			s, _ := NewTcpSocket(conn)
 
-			as, _ := NewAsynSocket(s, AsynSocketOption{
-				SendChanSize: 1000,
-				CloseCallBack: func(_ *AsynSocket, err error) {
-					log.Println("TestAsynSocket:client closed err:", err)
-				},
-				HandlePakcet: func(as *AsynSocket, packet interface{}) {
-				},
+			as := NewAsynSocket(s, AsynSocketOption{SendChanSize: 1000}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				log.Println("TestAsynSocket:client closed err:", err)
 			})
 
 			for i := 0; i < 100; i++ {

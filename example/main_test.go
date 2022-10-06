@@ -20,16 +20,14 @@ import (
 
 func serverSocket(s network.Socket) {
 	log.Println("on new client")
-	as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
-		CloseCallBack: func(_ *network.AsynSocket, err error) {
-			log.Println("server closed err:", err)
-		},
-		HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
-			as.Send(packet)
-			as.Recv(time.Second)
-		},
+	as := network.NewAsynSocket(s, network.AsynSocketOption{
 		Decoder: &PBDecoder{},
 		Packer:  &PBPacker{},
+	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+		log.Println("server closed err:", err)
+	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+		as.Send(packet)
+		as.Recv(time.Second)
 	})
 	as.Recv(time.Second)
 }
@@ -38,20 +36,19 @@ func clientSocket(s network.Socket) {
 	okChan := make(chan struct{})
 	count := int32(0)
 
-	as, _ := network.NewAsynSocket(s, network.AsynSocketOption{
-		CloseCallBack: func(_ *network.AsynSocket, err error) {
-			log.Println("client closed err:", err)
-		},
-		HandlePakcet: func(as *network.AsynSocket, packet interface{}) {
-			if atomic.AddInt32(&count, 1) == 100 {
-				close(okChan)
-			} else {
-				as.Recv()
-			}
-		},
+	as := network.NewAsynSocket(s, network.AsynSocketOption{
 		Decoder: &PBDecoder{},
 		Packer:  &PBPacker{},
+	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+		log.Println("client closed err:", err)
+	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+		if atomic.AddInt32(&count, 1) == 100 {
+			close(okChan)
+		} else {
+			as.Recv()
+		}
 	})
+
 	as.Recv()
 	for i := 0; i < 100; i++ {
 		as.Send(&Echo{Msg: proto.String("hello")})
