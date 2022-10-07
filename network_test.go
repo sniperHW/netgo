@@ -178,33 +178,23 @@ func TestWebSocket(t *testing.T) {
 func TestAsynSocket(t *testing.T) {
 	MaxSendBlockSize = 64
 	{
-
-		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
-
-		listener, _ := net.ListenTCP("tcp", tcpAddr)
-
-		go func() {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
+		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+			log.Println("TestAsynSocket: on client")
+			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{
+				AutoRecv:        true,
+				AutoRecvTimeout: time.Second,
+			}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				log.Println("TestAsynSocket: server closed err:", err)
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+				log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
+				if err := as.Send(packet); nil != err {
+					as.Close(err)
 					return
-				} else {
-					log.Println("TestAsynSocket: on client")
-					NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
-						AutoRecv:        true,
-						AutoRecvTimeout: time.Second,
-					}).SetCloseCallback(func(_ *AsynSocket, err error) {
-						log.Println("TestAsynSocket: server closed err:", err)
-					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
-						log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
-						if err := as.Send(packet); nil != err {
-							as.Close(err)
-							return
-						}
-					}).Recv(time.Now().Add(time.Second))
 				}
-			}
-		}()
+			}).Recv(time.Now().Add(time.Second))
+		})
+
+		go serve()
 
 		log.Println("here")
 
@@ -247,32 +237,23 @@ func TestAsynSocket(t *testing.T) {
 
 		okChan := make(chan struct{})
 
-		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
-
-		listener, _ := net.ListenTCP("tcp", tcpAddr)
-
-		go func() {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					return
+		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+			log.Println("TestAsynSocket:on client")
+			i := 0
+			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				log.Println("TestAsynSocket:server closed err:", err)
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+				i = i + len(packet.([]byte))
+				log.Println("TestAsynSocket:", i)
+				if i == 100*5 {
+					close(okChan)
 				} else {
-					log.Println("TestAsynSocket:on client")
-					i := 0
-					NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
-						log.Println("TestAsynSocket:server closed err:", err)
-					}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
-						i = i + len(packet.([]byte))
-						log.Println("TestAsynSocket:", i)
-						if i == 100*5 {
-							close(okChan)
-						} else {
-							as.Recv(time.Now().Add(time.Second))
-						}
-					}).Recv(time.Now().Add(time.Second))
+					as.Recv(time.Now().Add(time.Second))
 				}
-			}
-		}()
+			}).Recv(time.Now().Add(time.Second))
+		})
+
+		go serve()
 
 		dialer := &net.Dialer{}
 
@@ -301,32 +282,23 @@ func TestAsynSocket(t *testing.T) {
 func TestTCPSocket(t *testing.T) {
 
 	{
-		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
-
-		listener, _ := net.ListenTCP("tcp", tcpAddr)
-
-		go func() {
-			for {
-				conn, err := listener.Accept()
-				if err != nil {
-					return
-				} else {
-					log.Println("TestTCPSocket:on client")
-					s := NewTcpSocket(conn.(*net.TCPConn))
-					go func() {
-						for {
-							packet, err := s.Recv(time.Now().Add(time.Second))
-							if nil != err {
-								log.Println("TestTCPSocket:server recv err:", err)
-								break
-							}
-							s.Send(packet)
-						}
-						s.Close()
-					}()
+		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+			log.Println("TestTCPSocket:on client")
+			s := NewTcpSocket(conn)
+			go func() {
+				for {
+					packet, err := s.Recv(time.Now().Add(time.Second))
+					if nil != err {
+						log.Println("TestTCPSocket:server recv err:", err)
+						break
+					}
+					s.Send(packet)
 				}
-			}
-		}()
+				s.Close()
+			}()
+		})
+
+		go serve()
 
 		dialer := &net.Dialer{}
 

@@ -95,22 +95,12 @@ func TestEchoKCP(t *testing.T) {
 }
 
 func TestEchoTCP(t *testing.T) {
+	listener, serve, _ := network.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		log.Println("on client")
+		serverSocket(network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+	})
 
-	tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
-
-	listener, _ := net.ListenTCP("tcp", tcpAddr)
-
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			} else {
-				log.Println("on client")
-				serverSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
-			}
-		}
-	}()
+	go serve()
 
 	dialer := &net.Dialer{}
 

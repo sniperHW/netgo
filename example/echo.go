@@ -110,93 +110,79 @@ const (
 )
 
 func runLogicSvr() {
-	tcpAddr, _ := net.ResolveTCPAddr("tcp", logicService)
-	listener, _ := net.ListenTCP("tcp", tcpAddr)
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			} else {
-				network.NewAsynSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}),
-					network.AsynSocketOption{
-						Decoder:  &PBDecoder{},
-						Packer:   &PBPacker{},
-						AutoRecv: true,
-					}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
-					as.Send(packet)
-				}).Recv()
-			}
-		}
-	}()
+	_, serve, _ := network.ListenTCP("tcp", logicService, func(conn *net.TCPConn) {
+		network.NewAsynSocket(network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+			network.AsynSocketOption{
+				Decoder:  &PBDecoder{},
+				Packer:   &PBPacker{},
+				AutoRecv: true,
+			}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+			as.Send(packet)
+		}).Recv()
+	})
+
+	go serve()
+
 }
 
 func runGateSvr() {
 	dialer := &net.Dialer{}
-	tcpAddr, _ := net.ResolveTCPAddr("tcp", gateService)
-	listener, _ := net.ListenTCP("tcp", tcpAddr)
-	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			} else {
-				go func() {
-					cli := network.NewTcpSocket(conn.(*net.TCPConn))
-					var (
-						logic network.Socket
-					)
+	_, serve, _ := network.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
+		go func() {
+			cli := network.NewTcpSocket(conn)
+			var (
+				logic network.Socket
+			)
 
-					for i := 0; i < 3; i++ {
-						if logicConn, err := dialer.Dial("tcp", logicService); nil != err {
-							time.Sleep(time.Second)
-						} else {
-							logic = network.NewTcpSocket(logicConn.(*net.TCPConn))
-							break
-						}
-					}
-
-					if nil == logic {
-						cli.Close()
-					} else {
-						defer func() {
-							cli.Close()
-							logic.Close()
-						}()
-
-						for {
-							var n int
-							//recv a from client
-							dataClient, err := cli.Recv()
-							if nil != err {
-								return
-							}
-
-							//send to logic
-							n, err = logic.Send(dataClient)
-							if nil != err {
-								return
-							}
-
-							for n > 0 {
-								//recv response from logic
-								dataLogic, err := logic.Recv()
-								if nil != err {
-									return
-								}
-								n -= len(dataLogic)
-								//response client
-								_, err = cli.Send(dataLogic)
-								if nil != err {
-									return
-								}
-							}
-						}
-					}
-				}()
+			for i := 0; i < 3; i++ {
+				if logicConn, err := dialer.Dial("tcp", logicService); nil != err {
+					time.Sleep(time.Second)
+				} else {
+					logic = network.NewTcpSocket(logicConn.(*net.TCPConn))
+					break
+				}
 			}
-		}
-	}()
+
+			if nil == logic {
+				cli.Close()
+			} else {
+				defer func() {
+					cli.Close()
+					logic.Close()
+				}()
+
+				for {
+					var n int
+					//recv a from client
+					dataClient, err := cli.Recv()
+					if nil != err {
+						return
+					}
+
+					//send to logic
+					n, err = logic.Send(dataClient)
+					if nil != err {
+						return
+					}
+
+					for n > 0 {
+						//recv response from logic
+						dataLogic, err := logic.Recv()
+						if nil != err {
+							return
+						}
+						n -= len(dataLogic)
+						//response client
+						_, err = cli.Send(dataLogic)
+						if nil != err {
+							return
+						}
+					}
+				}
+			}
+		}()
+	})
+	go serve()
 }
 
 func runClient() {

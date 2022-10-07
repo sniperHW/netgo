@@ -4,7 +4,7 @@ import (
 	"net"
 )
 
-func ListenTCP(nettype string, service string, onNewclient func(net.Conn)) (net.Listener, func(), error) {
+func ListenTCP(nettype string, service string, onNewclient func(*net.TCPConn)) (net.Listener, func(), error) {
 	tcpAddr, err := net.ResolveTCPAddr(nettype, service)
 	if nil != err {
 		return nil, nil, err
@@ -24,7 +24,7 @@ func ListenTCP(nettype string, service string, onNewclient func(net.Conn)) (net.
 					return
 				}
 			} else {
-				onNewclient(conn)
+				onNewclient(conn.(*net.TCPConn))
 			}
 		}
 	}
