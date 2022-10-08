@@ -3,20 +3,20 @@ package main
 import (
 	"encoding/binary"
 	"errors"
+	"github.com/sniperHW/network"
+	"github.com/sniperHW/network/example/pb"
+	"google.golang.org/protobuf/proto"
 	"log"
 	"net"
 	"sync/atomic"
 	"time"
-
-	"github.com/golang/protobuf/proto"
-	"github.com/sniperHW/network"
 )
 
 type PBDecoder struct {
 }
 
 func (d *PBDecoder) Decode(b []byte) (interface{}, error) {
-	o := &Echo{}
+	o := &pb.Echo{}
 	if err := proto.Unmarshal(b, o); nil != err {
 		return nil, err
 	} else {
@@ -28,10 +28,10 @@ type PBPacker struct {
 }
 
 func (e *PBPacker) Pack(b []byte, o interface{}) []byte {
-	if _, ok := o.(*Echo); !ok {
+	if _, ok := o.(*pb.Echo); !ok {
 		return b
 	} else {
-		if data, err := proto.Marshal(o.(*Echo)); nil != err {
+		if data, err := proto.Marshal(o.(*pb.Echo)); nil != err {
 			return b
 		} else {
 			bu := make([]byte, 4)
@@ -219,7 +219,7 @@ func runClient() {
 	}).Recv()
 
 	for i := 0; i < 100; i++ {
-		as.Send(&Echo{Msg: proto.String("hello")})
+		as.Send(&pb.Echo{Msg: "hello"})
 	}
 	<-okChan
 	as.Close(nil)

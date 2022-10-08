@@ -4,9 +4,9 @@ package main
 //go tool cover -html=coverage.out
 import (
 	"crypto/sha1"
-	"github.com/golang/protobuf/proto"
 	gorilla "github.com/gorilla/websocket"
 	"github.com/sniperHW/network"
+	"github.com/sniperHW/network/example/pb"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
 	"log"
@@ -49,7 +49,7 @@ func clientSocket(s network.Socket) {
 		}
 	}).Recv()
 	for i := 0; i < 100; i++ {
-		as.Send(&Echo{Msg: proto.String("hello")})
+		as.Send(&pb.Echo{Msg: "hello"})
 	}
 	<-okChan
 	as.Close(nil)

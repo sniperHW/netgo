@@ -1,6 +1,7 @@
-syntax = "proto2";
-package main;
+syntax = "proto3";
+
+option go_package = "./pb";
 
 message Echo {
-	required string msg = 1;
+	string msg = 1;
 }
