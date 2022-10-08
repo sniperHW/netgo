@@ -3,8 +3,8 @@ package main
 import (
 	"encoding/binary"
 	"errors"
-	"github.com/sniperHW/network"
-	"github.com/sniperHW/network/example/pb"
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/netgo/example/pb"
 	"google.golang.org/protobuf/proto"
 	"log"
 	"net"
@@ -48,7 +48,7 @@ type PacketReceiver struct {
 	buff []byte
 }
 
-func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n int, err error) {
+func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (n int, err error) {
 	if deadline.IsZero() {
 		readable.SetReadDeadline(time.Time{})
 		n, err = readable.Read(r.buff[r.w:])
@@ -59,7 +59,7 @@ func (r *PacketReceiver) read(readable network.ReadAble, deadline time.Time) (n 
 	return
 }
 
-func (r *PacketReceiver) Recv(readable network.ReadAble, deadline time.Time) (pkt []byte, err error) {
+func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
 	const lenHead int = 4
 	for {
 		rr := r.r
@@ -110,13 +110,13 @@ const (
 )
 
 func runLogicSvr() {
-	_, serve, _ := network.ListenTCP("tcp", logicService, func(conn *net.TCPConn) {
-		network.NewAsynSocket(network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
-			network.AsynSocketOption{
+	_, serve, _ := netgo.ListenTCP("tcp", logicService, func(conn *net.TCPConn) {
+		netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+			netgo.AsynSocketOption{
 				Decoder:  &PBDecoder{},
 				Packer:   &PBPacker{},
 				AutoRecv: true,
-			}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+			}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 			as.Send(packet)
 		}).Recv()
 	})
@@ -127,18 +127,18 @@ func runLogicSvr() {
 
 func runGateSvr() {
 	dialer := &net.Dialer{}
-	_, serve, _ := network.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
+	_, serve, _ := netgo.ListenTCP("tcp", gateService, func(conn *net.TCPConn) {
 		go func() {
-			cli := network.NewTcpSocket(conn)
+			cli := netgo.NewTcpSocket(conn)
 			var (
-				logic network.Socket
+				logic netgo.Socket
 			)
 
 			for i := 0; i < 3; i++ {
 				if logicConn, err := dialer.Dial("tcp", logicService); nil != err {
 					time.Sleep(time.Second)
 				} else {
-					logic = network.NewTcpSocket(logicConn.(*net.TCPConn))
+					logic = netgo.NewTcpSocket(logicConn.(*net.TCPConn))
 					break
 				}
 			}
@@ -188,14 +188,14 @@ func runGateSvr() {
 func runClient() {
 	dialer := &net.Dialer{}
 	var (
-		s network.Socket
+		s netgo.Socket
 	)
 
 	for {
 		if conn, err := dialer.Dial("tcp", gateService); nil != err {
 			time.Sleep(time.Second)
 		} else {
-			s = network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)})
+			s = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)})
 			break
 		}
 	}
@@ -203,12 +203,12 @@ func runClient() {
 	okChan := make(chan struct{})
 	count := int32(0)
 
-	as := network.NewAsynSocket(s, network.AsynSocketOption{
+	as := netgo.NewAsynSocket(s, netgo.AsynSocketOption{
 		Decoder: &PBDecoder{},
 		Packer:  &PBPacker{},
-	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
-	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 		c := atomic.AddInt32(&count, 1)
 		log.Println("go echo resp", c)
 		if c == 100 {

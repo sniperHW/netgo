@@ -1,9 +1,9 @@
-package network
+package netgo
 
 import (
 	"context"
 	"errors"
-	"github.com/sniperHW/network/poolbuff"
+	"github.com/sniperHW/netgo/poolbuff"
 	"net"
 	"sync"
 	"sync/atomic"

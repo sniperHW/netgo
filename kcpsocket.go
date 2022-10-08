@@ -1,4 +1,4 @@
-package network
+package netgo
 
 import (
 	"github.com/xtaci/kcp-go/v5"

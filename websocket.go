@@ -1,4 +1,4 @@
-package network
+package netgo
 
 import (
 	gorilla "github.com/gorilla/websocket"

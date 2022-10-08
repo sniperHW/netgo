@@ -1,4 +1,4 @@
-package network
+package netgo
 
 //go test -race -covermode=atomic -v -coverprofile=coverage.out -run=.
 //go tool cover -html=coverage.out

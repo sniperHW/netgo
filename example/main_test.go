@@ -5,8 +5,8 @@ package main
 import (
 	"crypto/sha1"
 	gorilla "github.com/gorilla/websocket"
-	"github.com/sniperHW/network"
-	"github.com/sniperHW/network/example/pb"
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/netgo/example/pb"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
 	"log"
@@ -18,30 +18,30 @@ import (
 	"time"
 )
 
-func serverSocket(s network.Socket) {
+func serverSocket(s netgo.Socket) {
 	log.Println("on new client")
-	network.NewAsynSocket(s, network.AsynSocketOption{
+	netgo.NewAsynSocket(s, netgo.AsynSocketOption{
 		Decoder:         &PBDecoder{},
 		Packer:          &PBPacker{},
 		AutoRecv:        true,
 		AutoRecvTimeout: time.Second,
-	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("server closed err:", err)
-	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 		as.Send(packet)
 	}).Recv(time.Now().Add(time.Second))
 }
 
-func clientSocket(s network.Socket) {
+func clientSocket(s netgo.Socket) {
 	okChan := make(chan struct{})
 	count := int32(0)
 
-	as := network.NewAsynSocket(s, network.AsynSocketOption{
+	as := netgo.NewAsynSocket(s, netgo.AsynSocketOption{
 		Decoder: &PBDecoder{},
 		Packer:  &PBPacker{},
-	}).SetCloseCallback(func(_ *network.AsynSocket, err error) {
+	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
-	}).SetPacketHandler(func(as *network.AsynSocket, packet interface{}) {
+	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 		if atomic.AddInt32(&count, 1) == 100 {
 			close(okChan)
 		} else {
@@ -72,7 +72,7 @@ func TestEchoKCP(t *testing.T) {
 				if err != nil {
 					return
 				}
-				serverSocket(network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+				serverSocket(netgo.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 			}
 		}()
 	} else {
@@ -85,7 +85,7 @@ func TestEchoKCP(t *testing.T) {
 		block, _ := kcp.NewAESBlockCrypt(key)
 		// dial to the echo server
 		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-			clientSocket(network.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+			clientSocket(netgo.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 		} else {
 			log.Fatal(err)
 		}
@@ -95,9 +95,9 @@ func TestEchoKCP(t *testing.T) {
 }
 
 func TestEchoTCP(t *testing.T) {
-	listener, serve, _ := network.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		log.Println("on client")
-		serverSocket(network.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		serverSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 	})
 
 	go serve()
@@ -106,7 +106,7 @@ func TestEchoTCP(t *testing.T) {
 
 	{
 		conn, _ := dialer.Dial("tcp", "localhost:8110")
-		clientSocket(network.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
+		clientSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
 	}
 
 	listener.Close()
@@ -127,7 +127,7 @@ func TestEchoWebSocket(t *testing.T) {
 	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		conn, _ := upgrader.Upgrade(w, r, nil)
 		log.Println("on client")
-		serverSocket(network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		serverSocket(netgo.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 	})
 
 	go func() {
@@ -139,7 +139,7 @@ func TestEchoWebSocket(t *testing.T) {
 
 	{
 		conn, _, _ := dialer.Dial(u.String(), nil)
-		clientSocket(network.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		clientSocket(netgo.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
 	}
 
 	listener.Close()
