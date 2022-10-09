@@ -48,8 +48,8 @@ type PacketReceiver struct {
 	buff []byte
 }
 
-func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (n int, err error) {
-	if err = readable.SetReadDeadline(deadline); err != nil {
+func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
+	if err := readable.SetReadDeadline(deadline); err != nil {
 		return 0, err
 	} else {
 		return readable.Read(r.buff[r.w:])
