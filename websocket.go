@@ -86,27 +86,29 @@ func (wc *webSocket) Close() {
 
 func (wc *webSocket) Send(data []byte, deadline ...time.Time) (int, error) {
 	var err error
+	d := time.Time{}
 	if len(deadline) > 0 && !deadline[0].IsZero() {
-		wc.conn.SetWriteDeadline(deadline[0])
-		err = wc.conn.WriteMessage(gorilla.BinaryMessage, data)
-	} else {
-		wc.conn.SetWriteDeadline(time.Time{})
-		err = wc.conn.WriteMessage(gorilla.BinaryMessage, data)
+		d = deadline[0]
 	}
-	if nil == err {
-		return len(data), nil
-	} else {
+
+	if err = wc.conn.SetWriteDeadline(d); err != nil {
 		return 0, err
+	} else if err = wc.conn.WriteMessage(gorilla.BinaryMessage, data); err != nil {
+		return 0, err
+	} else {
+		return len(data), nil
 	}
 }
 
 func (wc *webSocket) Recv(deadline ...time.Time) (packet []byte, err error) {
 	if nil == wc.readableObj {
+		d := time.Time{}
 		if len(deadline) > 0 && !deadline[0].IsZero() {
-			wc.conn.SetReadDeadline(deadline[0])
-			_, packet, err = wc.conn.ReadMessage()
+			d = deadline[0]
+		}
+		if err = wc.conn.SetReadDeadline(d); err != nil {
+			return
 		} else {
-			wc.conn.SetReadDeadline(time.Time{})
 			_, packet, err = wc.conn.ReadMessage()
 		}
 	} else {

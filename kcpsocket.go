@@ -50,14 +50,17 @@ func (kc *kcpSocket) Close() {
 }
 
 func (kc *kcpSocket) Send(data []byte, deadline ...time.Time) (int, error) {
+	d := time.Time{}
 	if len(deadline) > 0 && !deadline[0].IsZero() {
-		kc.conn.SetWriteDeadline(deadline[0])
-		n, err := kc.conn.Write(data)
-		return n, err
+		d = deadline[0]
+	}
+
+	if err := kc.conn.SetWriteDeadline(d); err != nil {
+		return 0, err
 	} else {
-		kc.conn.SetWriteDeadline(time.Time{})
 		return kc.conn.Write(data)
 	}
+
 }
 
 func (kc *kcpSocket) Recv(deadline ...time.Time) ([]byte, error) {

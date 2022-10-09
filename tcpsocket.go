@@ -49,12 +49,13 @@ func (tc *tcpSocket) Close() {
 }
 
 func (tc *tcpSocket) Send(data []byte, deadline ...time.Time) (int, error) {
+	d := time.Time{}
 	if len(deadline) > 0 && !deadline[0].IsZero() {
-		tc.conn.SetWriteDeadline(deadline[0])
-		n, err := tc.conn.Write(data)
-		return n, err
+		d = deadline[0]
+	}
+	if err := tc.conn.SetWriteDeadline(d); err != nil {
+		return 0, err
 	} else {
-		tc.conn.SetWriteDeadline(time.Time{})
 		return tc.conn.Write(data)
 	}
 }
