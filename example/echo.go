@@ -12,10 +12,13 @@ import (
 	"time"
 )
 
-type PBDecoder struct {
+type PBCodec struct {
+	r    int
+	w    int
+	buff []byte
 }
 
-func (d *PBDecoder) Decode(b []byte) (interface{}, error) {
+func (codec *PBCodec) Decode(b []byte) (interface{}, error) {
 	o := &pb.Echo{}
 	if err := proto.Unmarshal(b, o); nil != err {
 		return nil, err
@@ -24,10 +27,7 @@ func (d *PBDecoder) Decode(b []byte) (interface{}, error) {
 	}
 }
 
-type PBPacker struct {
-}
-
-func (e *PBPacker) Pack(b []byte, o interface{}) []byte {
+func (codec *PBCodec) Encode(b []byte, o interface{}) []byte {
 	if _, ok := o.(*pb.Echo); !ok {
 		return b
 	} else {
@@ -42,58 +42,52 @@ func (e *PBPacker) Pack(b []byte, o interface{}) []byte {
 	}
 }
 
-type PacketReceiver struct {
-	r    int
-	w    int
-	buff []byte
-}
-
-func (r *PacketReceiver) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
+func (codec *PBCodec) read(readable netgo.ReadAble, deadline time.Time) (int, error) {
 	if err := readable.SetReadDeadline(deadline); err != nil {
 		return 0, err
 	} else {
-		return readable.Read(r.buff[r.w:])
+		return readable.Read(codec.buff[codec.w:])
 	}
 }
 
-func (r *PacketReceiver) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
+func (codec *PBCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []byte, err error) {
 	const lenHead int = 4
 	for {
-		rr := r.r
+		rr := codec.r
 		pktLen := 0
-		if (r.w-rr) >= lenHead && uint32(r.w-rr-lenHead) >= binary.BigEndian.Uint32(r.buff[rr:]) {
-			pktLen = int(binary.BigEndian.Uint32(r.buff[rr:]))
+		if (codec.w-rr) >= lenHead && uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
 			rr += lenHead
 		}
 
 		if pktLen > 0 {
-			if pktLen > (len(r.buff) - lenHead) {
+			if pktLen > (len(codec.buff) - lenHead) {
 				err = errors.New("pkt too large")
 				return
 			}
-			if (r.w - rr) >= pktLen {
-				pkt = r.buff[rr : rr+pktLen]
+			if (codec.w - rr) >= pktLen {
+				pkt = codec.buff[rr : rr+pktLen]
 				rr += pktLen
-				r.r = rr
-				if r.r == r.w {
-					r.r = 0
-					r.w = 0
+				codec.r = rr
+				if codec.r == codec.w {
+					codec.r = 0
+					codec.w = 0
 				}
 				return
 			}
 		}
 
-		if r.r > 0 {
+		if codec.r > 0 {
 			//移动到头部
-			copy(r.buff, r.buff[r.r:r.w])
-			r.w = r.w - r.r
-			r.r = 0
+			copy(codec.buff, codec.buff[codec.r:codec.w])
+			codec.w = codec.w - codec.r
+			codec.r = 0
 		}
 
 		var n int
-		n, err = r.read(readable, deadline)
+		n, err = codec.read(readable, deadline)
 		if n > 0 {
-			r.w += n
+			codec.w += n
 		}
 		if nil != err {
 			return
@@ -108,10 +102,10 @@ const (
 
 func runLogicSvr() {
 	_, serve, _ := netgo.ListenTCP("tcp", logicService, func(conn *net.TCPConn) {
-		netgo.NewAsynSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}),
+		codec := &PBCodec{buff: make([]byte, 4096)}
+		netgo.NewAsynSocket(netgo.NewTcpSocket(conn, codec),
 			netgo.AsynSocketOption{
-				Decoder:  &PBDecoder{},
-				Packer:   &PBPacker{},
+				Codec:    codec,
 				AutoRecv: true,
 			}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
 			as.Send(packet)
@@ -188,11 +182,13 @@ func runClient() {
 		s netgo.Socket
 	)
 
+	codec := &PBCodec{buff: make([]byte, 4096)}
+
 	for {
 		if conn, err := dialer.Dial("tcp", gateService); nil != err {
 			time.Sleep(time.Second)
 		} else {
-			s = netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)})
+			s = netgo.NewTcpSocket(conn.(*net.TCPConn), codec)
 			break
 		}
 	}
@@ -201,8 +197,7 @@ func runClient() {
 	count := int32(0)
 
 	as := netgo.NewAsynSocket(s, netgo.AsynSocketOption{
-		Decoder: &PBDecoder{},
-		Packer:  &PBPacker{},
+		Codec: codec,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
 	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {

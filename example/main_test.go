@@ -18,11 +18,10 @@ import (
 	"time"
 )
 
-func serverSocket(s netgo.Socket) {
+func serverSocket(s netgo.Socket, codec *PBCodec) {
 	log.Println("on new client")
 	netgo.NewAsynSocket(s, netgo.AsynSocketOption{
-		Decoder:         &PBDecoder{},
-		Packer:          &PBPacker{},
+		Codec:           codec,
 		AutoRecv:        true,
 		AutoRecvTimeout: time.Second,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
@@ -32,13 +31,12 @@ func serverSocket(s netgo.Socket) {
 	}).Recv(time.Now().Add(time.Second))
 }
 
-func clientSocket(s netgo.Socket) {
+func clientSocket(s netgo.Socket, codec *PBCodec) {
 	okChan := make(chan struct{})
 	count := int32(0)
 
 	as := netgo.NewAsynSocket(s, netgo.AsynSocketOption{
-		Decoder: &PBDecoder{},
-		Packer:  &PBPacker{},
+		Codec: codec,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
 	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) {
@@ -72,7 +70,8 @@ func TestEchoKCP(t *testing.T) {
 				if err != nil {
 					return
 				}
-				serverSocket(netgo.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+				codec := &PBCodec{buff: make([]byte, 4096)}
+				serverSocket(netgo.NewKcpSocket(conn, codec), codec)
 			}
 		}()
 	} else {
@@ -85,7 +84,8 @@ func TestEchoKCP(t *testing.T) {
 		block, _ := kcp.NewAESBlockCrypt(key)
 		// dial to the echo server
 		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
-			clientSocket(netgo.NewKcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+			codec := &PBCodec{buff: make([]byte, 4096)}
+			clientSocket(netgo.NewKcpSocket(conn, codec), codec)
 		} else {
 			log.Fatal(err)
 		}
@@ -97,7 +97,8 @@ func TestEchoKCP(t *testing.T) {
 func TestEchoTCP(t *testing.T) {
 	listener, serve, _ := netgo.ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
 		log.Println("on client")
-		serverSocket(netgo.NewTcpSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		codec := &PBCodec{buff: make([]byte, 4096)}
+		serverSocket(netgo.NewTcpSocket(conn, codec), codec)
 	})
 
 	go serve()
@@ -106,7 +107,8 @@ func TestEchoTCP(t *testing.T) {
 
 	{
 		conn, _ := dialer.Dial("tcp", "localhost:8110")
-		clientSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), &PacketReceiver{buff: make([]byte, 4096)}))
+		codec := &PBCodec{buff: make([]byte, 4096)}
+		clientSocket(netgo.NewTcpSocket(conn.(*net.TCPConn), codec), codec)
 	}
 
 	listener.Close()
@@ -127,7 +129,8 @@ func TestEchoWebSocket(t *testing.T) {
 	http.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		conn, _ := upgrader.Upgrade(w, r, nil)
 		log.Println("on client")
-		serverSocket(netgo.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		codec := &PBCodec{buff: make([]byte, 4096)}
+		serverSocket(netgo.NewWebSocket(conn, codec), codec)
 	})
 
 	go func() {
@@ -139,7 +142,8 @@ func TestEchoWebSocket(t *testing.T) {
 
 	{
 		conn, _, _ := dialer.Dial(u.String(), nil)
-		clientSocket(netgo.NewWebSocket(conn, &PacketReceiver{buff: make([]byte, 4096)}))
+		codec := &PBCodec{buff: make([]byte, 4096)}
+		clientSocket(netgo.NewWebSocket(conn, codec), codec)
 	}
 
 	listener.Close()

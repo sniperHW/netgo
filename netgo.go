@@ -13,26 +13,6 @@ func IsNetTimeoutError(err error) bool {
 	}
 }
 
-//convert obj from binary buff
-type ObjDecoder interface {
-	Decode([]byte) (interface{}, error)
-}
-
-//converto obj to binary packet for send
-type ObjPacker interface {
-
-	// Example:
-	//
-	// Pack(buff []byte, o interface{}) ([]byte,error) {
-	//	if b,err := encode2Packet(o) {
-	//		return append(buff,b...)
-	//	} else {
-	//		return buff
-	//	}
-	//}
-	Pack([]byte, interface{}) []byte
-}
-
 type ReadAble interface {
 	Read([]byte) (int, error)
 	SetReadDeadline(time.Time) error
@@ -82,15 +62,8 @@ func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, e
 		n   int
 		err error
 	)
-
 	buff := make([]byte, 4096)
-
-	if deadline.IsZero() {
-		r.SetReadDeadline(time.Time{})
-		n, err = r.Read(buff)
-	} else {
-		r.SetReadDeadline(deadline)
-		n, err = r.Read(buff)
-	}
+	r.SetReadDeadline(deadline)
+	n, err = r.Read(buff)
 	return buff[:n], err
 }

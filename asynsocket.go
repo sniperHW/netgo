@@ -19,20 +19,24 @@ var (
 
 var MaxSendBlockSize int = 65535
 
+type ObjCodec interface {
+	Decode([]byte) (interface{}, error)
+	Encode([]byte, interface{}) []byte
+}
+
 type AsynSocketOption struct {
-	Decoder          ObjDecoder
-	Packer           ObjPacker
+	Codec            ObjCodec
 	SendChanSize     int
 	AsyncSendTimeout time.Duration
-	PackBuffer       PackBuffer
+	OutputBuffer     OutputBuffer
 	AutoRecv         bool          //处理完packet后自动调用Recv
 	AutoRecvTimeout  time.Duration //自动调用Recv时的超时时间
 }
 
-type defaultPacker struct {
+type defaultCodec struct {
 }
 
-func (de *defaultPacker) Pack(buff []byte, o interface{}) []byte {
+func (codec *defaultCodec) Encode(buff []byte, o interface{}) []byte {
 	if b, ok := o.([]byte); ok {
 		return append(buff, b...)
 	} else {
@@ -40,10 +44,7 @@ func (de *defaultPacker) Pack(buff []byte, o interface{}) []byte {
 	}
 }
 
-type defalutDecoder struct {
-}
-
-func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
+func (codec *defaultCodec) Decode(buff []byte) (interface{}, error) {
 	packet := make([]byte, len(buff))
 	copy(packet, buff)
 	return packet, nil
@@ -55,8 +56,8 @@ func (dd *defalutDecoder) Decode(buff []byte) (interface{}, error) {
 //
 //或后面没有待发送对象，再一次情况将整个缓冲区交给Send
 //
-//PackBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现PackBuffer
-type PackBuffer interface {
+//OutputBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现OutputBuffer
+type OutputBuffer interface {
 	//pack用的缓冲区
 	GetBuffer() []byte
 
@@ -77,8 +78,7 @@ type PackBuffer interface {
 //asynchronize encapsulation for Socket
 type AsynSocket struct {
 	socket           Socket
-	decoder          ObjDecoder
-	packer           ObjPacker
+	codec            ObjCodec
 	die              chan struct{}
 	recvReq          chan time.Time
 	sendReq          chan interface{}
@@ -92,7 +92,7 @@ type AsynSocket struct {
 	handlePakcet     func(*AsynSocket, interface{})
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
-	packBuffer       PackBuffer
+	outputBuffer     OutputBuffer
 	autoRecv         bool
 	autoRecvTimeout  time.Duration
 }
@@ -105,22 +105,18 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 
 	s := &AsynSocket{
 		socket:           socket,
-		decoder:          option.Decoder,
-		packer:           option.Packer,
 		die:              make(chan struct{}),
 		recvReq:          make(chan time.Time, 1),
 		sendReq:          make(chan interface{}, option.SendChanSize),
 		asyncSendTimeout: option.AsyncSendTimeout,
-		packBuffer:       option.PackBuffer,
+		outputBuffer:     option.OutputBuffer,
 		autoRecv:         option.AutoRecv,
 		autoRecvTimeout:  option.AutoRecvTimeout,
+		codec:            option.Codec,
 	}
 
-	if nil == s.decoder {
-		s.decoder = &defalutDecoder{}
-	}
-	if nil == s.packer {
-		s.packer = &defaultPacker{}
+	if s.codec == nil {
+		s.codec = &defaultCodec{}
 	}
 
 	s.closeCallBack = func(*AsynSocket, error) {
@@ -135,8 +131,8 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 		s.Recv()
 	}
 
-	if nil == s.packBuffer {
-		s.packBuffer = poolbuff.New()
+	if s.outputBuffer == nil {
+		s.outputBuffer = poolbuff.New()
 	}
 
 	return s
@@ -255,7 +251,7 @@ func (s *AsynSocket) recvloop() {
 					return
 				default:
 					if nil == err {
-						packet, err = s.decoder.Decode(buff)
+						packet, err = s.codec.Decode(buff)
 					}
 					if nil == err {
 						s.handlePakcet(s, packet)
@@ -302,36 +298,36 @@ func (s *AsynSocket) sendloop() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
 				s.doClose()
 			}
-			s.packBuffer.Clear()
+			s.outputBuffer.Clear()
 		}()
 		for {
 			select {
 			case <-s.die:
 				for len(s.sendReq) > 0 {
 					o := <-s.sendReq
-					buff := s.packBuffer.OnUpdate(s.packer.Pack(s.packBuffer.GetBuffer(), o))
+					buff := s.outputBuffer.OnUpdate(s.codec.Encode(s.outputBuffer.GetBuffer(), o))
 					if len(buff) >= MaxSendBlockSize {
 						if s.send(buff) != nil {
 							return
 						} else {
-							s.packBuffer.ResetBuffer()
+							s.outputBuffer.ResetBuffer()
 						}
 					}
 				}
 
-				if buff := s.packBuffer.GetBuffer(); len(buff) > 0 {
+				if buff := s.outputBuffer.GetBuffer(); len(buff) > 0 {
 					s.send(buff)
 				}
 				return
 			case o := <-s.sendReq:
-				buff := s.packBuffer.OnUpdate(s.packer.Pack(s.packBuffer.GetBuffer(), o))
+				buff := s.outputBuffer.OnUpdate(s.codec.Encode(s.outputBuffer.GetBuffer(), o))
 				l := len(buff)
 				if l >= MaxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
 					if err = s.send(buff); nil != err {
 						s.Close(err)
 						return
 					}
-					s.packBuffer.ReleaseBuffer()
+					s.outputBuffer.ReleaseBuffer()
 				}
 			}
 		}
