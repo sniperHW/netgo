@@ -10,10 +10,22 @@ import (
 	"time"
 )
 
+type errTimeout struct {
+	error
+}
+
+func (e *errTimeout) Timeout() bool {
+	return true
+}
+
+func (e *errTimeout) Temporary() bool {
+	return false
+}
+
 var (
-	ErrRecvTimeout     error = errors.New("RecvTimeout")
-	ErrSendTimeout     error = errors.New("SendTimeout")
-	ErrAsynSendTimeout error = errors.New("ErrAsynSendTimeout")
+	ErrRecvTimeout     error = &errTimeout{error: errors.New("RecvTimeout")}
+	ErrSendTimeout     error = &errTimeout{error: errors.New("SendTimeout")}
+	ErrAsynSendTimeout error = &errTimeout{error: errors.New("ErrAsynSendTimeout")}
 	ErrSocketClosed    error = errors.New("SocketClosed")
 )
 
