@@ -89,7 +89,7 @@ type AsynSocket struct {
 	closeReason      atomic.Value
 	doCloseOnce      sync.Once
 	closeCallBack    func(*AsynSocket, error) //call when routineCount trun to zero
-	handlePakcet     func(*AsynSocket, interface{})
+	handlePakcet     func(*AsynSocket, interface{}) error
 	onRecvTimeout    func(*AsynSocket)
 	asyncSendTimeout time.Duration
 	outputBuffer     OutputBuffer
@@ -127,8 +127,9 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 		s.Close(ErrRecvTimeout)
 	}
 
-	s.handlePakcet = func(*AsynSocket, interface{}) {
+	s.handlePakcet = func(*AsynSocket, interface{}) error {
 		s.Recv()
+		return nil
 	}
 
 	if s.outputBuffer == nil {
@@ -152,7 +153,7 @@ func (s *AsynSocket) SetRecvTimeoutCallback(onRecvTimeout func(*AsynSocket)) *As
 	return s
 }
 
-func (s *AsynSocket) SetPacketHandler(handlePakcet func(*AsynSocket, interface{})) *AsynSocket {
+func (s *AsynSocket) SetPacketHandler(handlePakcet func(*AsynSocket, interface{}) error) *AsynSocket {
 	if handlePakcet != nil {
 		s.handlePakcet = handlePakcet
 	}
@@ -254,12 +255,16 @@ func (s *AsynSocket) recvloop() {
 						packet, err = s.codec.Decode(buff)
 					}
 					if nil == err {
-						s.handlePakcet(s, packet)
+						if err = s.handlePakcet(s, packet); err != nil {
+							s.Close(err)
+							return
+						}
 					} else {
 						if IsNetTimeoutError(err) {
 							s.onRecvTimeout(s)
 						} else {
 							s.Close(err)
+							return
 						}
 					}
 					if s.autoRecv {

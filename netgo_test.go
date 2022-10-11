@@ -176,11 +176,12 @@ func TestAsynSocket(t *testing.T) {
 				AutoRecvTimeout: time.Second,
 			}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket: server closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
 				log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
 				if err := as.Send(packet); nil != err {
-					as.Close(err)
-					return
+					return err
+				} else {
+					return nil
 				}
 			}).Recv(time.Now().Add(time.Second))
 		})
@@ -197,9 +198,10 @@ func TestAsynSocket(t *testing.T) {
 
 			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket: client closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
 				log.Println("TestAsynSocket: client", string(packet.([]byte)))
 				close(okChan)
+				return nil
 			}).Recv()
 			log.Println("TestAsynSocket: send", as.Send([]byte("hello")))
 			<-okChan
@@ -233,7 +235,7 @@ func TestAsynSocket(t *testing.T) {
 			i := 0
 			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket:server closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) {
+			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
 				i = i + len(packet.([]byte))
 				log.Println("TestAsynSocket:", i)
 				if i == 100*5 {
@@ -241,6 +243,7 @@ func TestAsynSocket(t *testing.T) {
 				} else {
 					as.Recv(time.Now().Add(time.Second))
 				}
+				return nil
 			}).Recv(time.Now().Add(time.Second))
 		})
 
