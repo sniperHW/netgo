@@ -8,6 +8,8 @@ type kcpSocket struct {
 	socketBase
 }
 
+var _ Socket = &kcpSocket{}
+
 func (kc *kcpSocket) GetUnderConn() interface{} {
 	return kc.conn.(*kcp.UDPSession)
 }

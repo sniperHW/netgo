@@ -49,6 +49,8 @@ type webSocket struct {
 	readableObj    *webSocketReadable
 }
 
+var _ Socket = &webSocket{}
+
 func (wc *webSocket) LocalAddr() net.Addr {
 	return wc.conn.LocalAddr()
 }

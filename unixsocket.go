@@ -8,6 +8,8 @@ type unixSocket struct {
 	socketBase
 }
 
+var _ Socket = &unixSocket{}
+
 func (tc *unixSocket) GetUnderConn() interface{} {
 	return tc.conn.(*net.UnixConn)
 }
