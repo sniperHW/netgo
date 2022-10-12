@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"github.com/sniperHW/netgo"
@@ -107,7 +108,7 @@ func runLogicSvr() {
 			netgo.AsynSocketOption{
 				Codec:    codec,
 				AutoRecv: true,
-			}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+			}).SetPacketHandler(func(_ context.Context, as *netgo.AsynSocket, packet interface{}) error {
 			as.Send(packet)
 			return nil
 		}).Recv()
@@ -201,7 +202,7 @@ func runClient() {
 		Codec: codec,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
-	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+	}).SetPacketHandler(func(_ context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		c := atomic.AddInt32(&count, 1)
 		log.Println("go echo resp", c)
 		if c == 100 {

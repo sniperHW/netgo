@@ -3,6 +3,7 @@ package netgo
 //go test -race -covermode=atomic -v -coverprofile=coverage.out -run=.
 //go tool cover -html=coverage.out
 import (
+	"context"
 	"crypto/sha1"
 	gorilla "github.com/gorilla/websocket"
 	"github.com/xtaci/kcp-go/v5"
@@ -176,7 +177,7 @@ func TestAsynSocket(t *testing.T) {
 				AutoRecvTimeout: time.Second,
 			}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket: server closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
+			}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
 				log.Println("TestAsynSocket: server on packet", string(packet.([]byte)))
 				if err := as.Send(packet); nil != err {
 					return err
@@ -198,7 +199,7 @@ func TestAsynSocket(t *testing.T) {
 
 			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket: client closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
+			}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
 				log.Println("TestAsynSocket: client", string(packet.([]byte)))
 				close(okChan)
 				return nil
@@ -235,7 +236,7 @@ func TestAsynSocket(t *testing.T) {
 			i := 0
 			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket:server closed err:", err)
-			}).SetPacketHandler(func(as *AsynSocket, packet interface{}) error {
+			}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
 				i = i + len(packet.([]byte))
 				log.Println("TestAsynSocket:", i)
 				if i == 100*5 {
@@ -270,6 +271,47 @@ func TestAsynSocket(t *testing.T) {
 
 		listener.Close()
 
+	}
+	// test cancel
+	{
+		c := make(chan struct{})
+
+		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+			log.Println("TestAsynSocket: on client")
+			ctx, cancel := context.WithCancel(context.Background())
+			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{
+				AutoRecv:        true,
+				AutoRecvTimeout: time.Second,
+				Context:         ctx,
+			}).SetCloseCallback(func(_ *AsynSocket, err error) {
+				cancel()
+				log.Println("TestAsynSocket: server closed err:", err)
+			}).SetPacketHandler(func(ctx context.Context, as *AsynSocket, packet interface{}) error {
+				go func() {
+					select {
+					case <-ctx.Done():
+						log.Println("context Done error:", ctx.Err())
+						close(c)
+						return
+					}
+				}()
+				return nil
+			}).Recv(time.Now().Add(time.Second))
+		})
+
+		go serve()
+
+		log.Println("here")
+
+		dialer := &net.Dialer{}
+
+		conn, _ := dialer.Dial("tcp", "localhost:8110")
+
+		as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{})
+		as.Send([]byte("hello"), time.Now().Add(time.Second))
+		as.Close(nil)
+		<-c
+		listener.Close()
 	}
 }
 

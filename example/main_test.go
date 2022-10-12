@@ -3,6 +3,7 @@ package main
 //go test -race -covermode=atomic -v -coverprofile=coverage.out -run=.
 //go tool cover -html=coverage.out
 import (
+	"context"
 	"crypto/sha1"
 	gorilla "github.com/gorilla/websocket"
 	"github.com/sniperHW/netgo"
@@ -26,7 +27,7 @@ func serverSocket(s netgo.Socket, codec *PBCodec) {
 		AutoRecvTimeout: time.Second,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("server closed err:", err)
-	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+	}).SetPacketHandler(func(_ context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		as.Send(packet)
 		return nil
 	}).Recv(time.Now().Add(time.Second))
@@ -40,7 +41,7 @@ func clientSocket(s netgo.Socket, codec *PBCodec) {
 		Codec: codec,
 	}).SetCloseCallback(func(_ *netgo.AsynSocket, err error) {
 		log.Println("client closed err:", err)
-	}).SetPacketHandler(func(as *netgo.AsynSocket, packet interface{}) error {
+	}).SetPacketHandler(func(_ context.Context, as *netgo.AsynSocket, packet interface{}) error {
 		if atomic.AddInt32(&count, 1) == 100 {
 			close(okChan)
 		} else {
