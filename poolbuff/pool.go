@@ -39,7 +39,7 @@ var defaultPool Pool
 // Got byte buffer may be returned to the pool via Put call.
 // This reduces the number of memory allocations required for byte buffer
 // management.
-func get() []byte { return defaultPool.get() }
+func Get() []byte { return defaultPool.get() }
 
 // Get returns new byte buffer with zero length.
 //
@@ -58,7 +58,7 @@ func (p *Pool) get() []byte {
 //
 // ByteBuffer.B mustn't be touched after returning it to the pool.
 // Otherwise data races will occur.
-func put(b []byte) { defaultPool.put(b) }
+func Put(b []byte) { defaultPool.put(b) }
 
 // Put releases byte buffer obtained via Get to the pool.
 //

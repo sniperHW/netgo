@@ -28,22 +28,7 @@ func (codec *PBCodec) Decode(b []byte) (interface{}, error) {
 	}
 }
 
-func (codec *PBCodec) EncodeToBuff(b []byte, o interface{}) []byte {
-	if _, ok := o.(*pb.Echo); !ok {
-		return b
-	} else {
-		if data, err := proto.Marshal(o.(*pb.Echo)); nil != err {
-			return b
-		} else {
-			bu := make([]byte, 4)
-			binary.BigEndian.PutUint32(bu, uint32(len(data)))
-			b = append(b, bu...)
-			return append(b, data...)
-		}
-	}
-}
-
-func (codec *PBCodec) EncodeToBuffs(buffs net.Buffers, o interface{}) (net.Buffers, int) {
+func (codec *PBCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
 	if _, ok := o.(*pb.Echo); !ok {
 		return buffs, 0
 	} else {

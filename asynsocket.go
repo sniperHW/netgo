@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"github.com/sniperHW/netgo/poolbuff"
-	//"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -34,17 +33,13 @@ var MaxSendBlockSize int = 65535
 
 type ObjCodec interface {
 	Decode([]byte) (interface{}, error)
-	//返回对象序列化后的[]byte
-	EncodeToBuffs(net.Buffers, interface{}) (net.Buffers, int)
-	//将对象序列化后的[]byte添加到第一个参数的尾部并返回
-	EncodeToBuff([]byte, interface{}) []byte
+	Encode(net.Buffers, interface{}) (net.Buffers, int)
 }
 
 type AsynSocketOption struct {
 	Codec            ObjCodec
 	SendChanSize     int
 	AsyncSendTimeout time.Duration
-	OutputBuffer     OutputBuffer
 	AutoRecv         bool          //处理完packet后自动调用Recv
 	AutoRecvTimeout  time.Duration //自动调用Recv时的超时时间
 	Context          context.Context
@@ -53,15 +48,7 @@ type AsynSocketOption struct {
 type defaultCodec struct {
 }
 
-func (codec *defaultCodec) EncodeToBuff(buff []byte, o interface{}) []byte {
-	if b, ok := o.([]byte); ok {
-		return append(buff, b...)
-	} else {
-		return buff
-	}
-}
-
-func (codec *defaultCodec) EncodeToBuffs(buffs net.Buffers, o interface{}) (net.Buffers, int) {
+func (codec *defaultCodec) Encode(buffs net.Buffers, o interface{}) (net.Buffers, int) {
 	if b, ok := o.([]byte); ok {
 		return append(buffs, b), len(b)
 	} else {
@@ -73,33 +60,6 @@ func (codec *defaultCodec) Decode(buff []byte) (interface{}, error) {
 	packet := make([]byte, len(buff))
 	copy(packet, buff)
 	return packet, nil
-}
-
-// 对于没有实现BuffersSender接口的Socket类型（kcpSocket和webSocket）
-//
-// 每发送一个对象，都将产生一次Send系统调用，对于大量小对象的情况将严重影响效率
-//
-// 更合理做法是提供一个缓冲区，将待发送对象pack到缓冲区中，当缓冲区累积到一定数量
-//
-// 或后面没有待发送对象，再一次情况将整个缓冲区交给Send
-//
-// OutputBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现OutputBuffer
-type OutputBuffer interface {
-	//pack用的缓冲区
-	GetBuffer() []byte
-
-	//pack完成后,将更新后的缓冲区交给PackBuffer更新内部缓冲区
-	//
-	//下次再调用GetBuffer将返回更新后的缓冲区
-	OnUpdate([]byte) []byte
-
-	//buff使用完毕后释放
-	ReleaseBuffer()
-
-	//sender退出时调用，如果内部buff是从pool获取的,Clear应该将buff归还pool
-	Clear()
-
-	ResetBuffer()
 }
 
 // asynchronize encapsulation for Socket
@@ -119,7 +79,6 @@ type AsynSocket struct {
 	handlePakcet     atomic.Value //func(context.Context, *AsynSocket, interface{}) error
 	onRecvTimeout    atomic.Value //func(*AsynSocket)
 	asyncSendTimeout time.Duration
-	outputBuffer     OutputBuffer
 	autoRecv         bool
 	autoRecvTimeout  time.Duration
 	context          context.Context
@@ -137,7 +96,6 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 		recvReq:          make(chan time.Time, 1),
 		sendReq:          make(chan interface{}, option.SendChanSize),
 		asyncSendTimeout: option.AsyncSendTimeout,
-		outputBuffer:     option.OutputBuffer,
 		autoRecv:         option.AutoRecv,
 		autoRecvTimeout:  option.AutoRecvTimeout,
 		codec:            option.Codec,
@@ -164,10 +122,6 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 		s.Recv()
 		return nil
 	})
-
-	if s.outputBuffer == nil {
-		s.outputBuffer = poolbuff.New()
-	}
 
 	return s
 }
@@ -316,37 +270,29 @@ func (s *AsynSocket) recvloop() {
 	}()
 }
 
-func (s *AsynSocket) send(buff []byte) error {
+func (s *AsynSocket) sendBuffs(buffs net.Buffers) (err error) {
 	deadline := time.Time{}
 	if s.asyncSendTimeout > 0 {
 		deadline = time.Now().Add(s.asyncSendTimeout)
 	}
 
-	if _, err := s.socket.Send(buff, deadline); nil != err {
-		if IsNetTimeoutError(err) {
-			err = ErrAsynSendTimeout
-		}
-		return err
+	if buffersSender, ok := s.socket.(BuffersSender); ok {
+		_, err = buffersSender.SendBuffers(buffs, deadline)
 	} else {
-		return nil
+		outputBuffer := poolbuff.Get()
+		defer poolbuff.Put(outputBuffer)
+		for _, v := range buffs {
+			outputBuffer = append(outputBuffer, v...)
+		}
+		_, err = s.socket.Send(outputBuffer, deadline)
 	}
-}
 
-func (s *AsynSocket) sendBuffs(buffs net.Buffers) error {
-	//log.Println("sendBuffs", len(buffs))
-	deadline := time.Time{}
-	if s.asyncSendTimeout > 0 {
-		deadline = time.Now().Add(s.asyncSendTimeout)
-	}
-	buffersSender := s.socket.(BuffersSender)
-	if _, err := buffersSender.SendBuffers(buffs, deadline); nil != err {
+	if nil != err {
 		if IsNetTimeoutError(err) {
 			err = ErrAsynSendTimeout
 		}
-		return err
-	} else {
-		return nil
 	}
+	return err
 }
 
 func (s *AsynSocket) sendloop() {
@@ -359,77 +305,43 @@ func (s *AsynSocket) sendloop() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
 				s.doClose()
 			}
-			s.outputBuffer.Clear()
 		}()
 
-		if _, ok := s.socket.(BuffersSender); ok {
-			maxBuffSize := 1024
-			total := 0
-			n := 0
-			buffs := net.Buffers{}
-			for {
-				select {
-				case <-s.die:
-					for len(s.sendReq) > 0 {
-						o := <-s.sendReq
-						buffs, n = s.codec.EncodeToBuffs(buffs, o)
-						total += n
-						if total >= MaxSendBlockSize || len(buffs) >= maxBuffSize {
-							if s.sendBuffs(buffs) != nil {
-								return
-							} else {
-								buffs = buffs[:0]
-								total = 0
-							}
-						}
-					}
-
-					if total > 0 {
-						s.sendBuffs(buffs)
-					}
-					return
-				case o := <-s.sendReq:
-					buffs, n = s.codec.EncodeToBuffs(buffs, o)
+		maxBuffSize := 1024
+		total := 0
+		n := 0
+		buffs := net.Buffers{}
+		for {
+			select {
+			case <-s.die:
+				for len(s.sendReq) > 0 {
+					o := <-s.sendReq
+					buffs, n = s.codec.Encode(buffs, o)
 					total += n
-					if (total >= MaxSendBlockSize || len(buffs) >= maxBuffSize) || (total > 0 && len(s.sendReq) == 0) {
-						if err = s.sendBuffs(buffs); nil != err {
-							s.Close(err)
+					if total >= MaxSendBlockSize || len(buffs) >= maxBuffSize {
+						if s.sendBuffs(buffs) != nil {
 							return
+						} else {
+							buffs = buffs[:0]
+							total = 0
 						}
-						buffs = net.Buffers{}
-						total = 0
 					}
 				}
-			}
-		} else {
-			for {
-				select {
-				case <-s.die:
-					for len(s.sendReq) > 0 {
-						o := <-s.sendReq
-						buff := s.outputBuffer.OnUpdate(s.codec.EncodeToBuff(s.outputBuffer.GetBuffer(), o))
-						if len(buff) >= MaxSendBlockSize {
-							if s.send(buff) != nil {
-								return
-							} else {
-								s.outputBuffer.ResetBuffer()
-							}
-						}
+
+				if total > 0 {
+					s.sendBuffs(buffs)
+				}
+				return
+			case o := <-s.sendReq:
+				buffs, n = s.codec.Encode(buffs, o)
+				total += n
+				if (total >= MaxSendBlockSize || len(buffs) >= maxBuffSize) || (total > 0 && len(s.sendReq) == 0) {
+					if err = s.sendBuffs(buffs); nil != err {
+						s.Close(err)
+						return
 					}
-					if buff := s.outputBuffer.GetBuffer(); len(buff) > 0 {
-						s.send(buff)
-					}
-					return
-				case o := <-s.sendReq:
-					buff := s.outputBuffer.OnUpdate(s.codec.EncodeToBuff(s.outputBuffer.GetBuffer(), o))
-					l := len(buff)
-					if l >= MaxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
-						if err = s.send(buff); nil != err {
-							s.Close(err)
-							return
-						}
-						s.outputBuffer.ReleaseBuffer()
-					}
+					buffs = net.Buffers{}
+					total = 0
 				}
 			}
 		}
