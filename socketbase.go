@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-//base of kcpSocket/tcpSocket/unixSocket
+// base of kcpSocket/tcpSocket/unixSocket
 type socketBase struct {
 	userData       atomic.Value
 	packetReceiver PacketReceiver
@@ -27,6 +27,10 @@ func (base *socketBase) init(conn net.Conn, packetReceiver ...PacketReceiver) {
 	runtime.SetFinalizer(base, func(base *socketBase) {
 		base.Close()
 	})
+}
+
+func (base *socketBase) GetUnderConn() interface{} {
+	return base.conn
 }
 
 func (base *socketBase) Close() {

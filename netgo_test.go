@@ -5,6 +5,7 @@ package netgo
 import (
 	"context"
 	"crypto/sha1"
+	"errors"
 	gorilla "github.com/gorilla/websocket"
 	"github.com/xtaci/kcp-go/v5"
 	"golang.org/x/crypto/pbkdf2"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 )
@@ -358,4 +360,60 @@ func TestTCPSocket(t *testing.T) {
 
 		listener.Close()
 	}
+}
+
+func TestAsynSocket2(t *testing.T) {
+
+	listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		log.Println("TestAsynSocket:on client")
+		NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
+			log.Println("TestAsynSocket:server closed err:", err)
+		}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
+			as.Send(packet)
+			as.Recv(time.Now().Add(time.Second))
+			return nil
+		}).Recv(time.Now().Add(time.Second))
+	})
+
+	go serve()
+
+	dialer := &net.Dialer{}
+
+	{
+
+		okChan := make(chan struct{})
+		total := 0
+		msg := []byte(strings.Repeat("a", 1024))
+		conn, _ := dialer.Dial("tcp", "localhost:8110")
+		as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
+			SendChanSize: 1000,
+		}).SetCloseCallback(func(_ *AsynSocket, err error) {
+			log.Println("TestAsynSocket:client closed err:", err)
+		}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
+			total += len(packet.([]byte))
+			log.Println(total)
+			if total >= 1024*10000 {
+				close(okChan)
+				return errors.New("active close")
+			}
+			as.Send(packet)
+			as.Recv(time.Now().Add(time.Second))
+			return nil
+		}).Recv(time.Now().Add(time.Second))
+
+		beg := time.Now()
+
+		for i := 0; i < 100; i++ {
+			as.Send(msg)
+		}
+
+		<-okChan
+
+		log.Println("use", time.Now().Sub(beg))
+
+		as.Close(nil)
+	}
+
+	listener.Close()
+
 }

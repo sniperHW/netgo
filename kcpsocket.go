@@ -10,10 +10,6 @@ type kcpSocket struct {
 
 var _ Socket = &kcpSocket{}
 
-func (kc *kcpSocket) GetUnderConn() interface{} {
-	return kc.conn.(*kcp.UDPSession)
-}
-
 func NewKcpSocket(conn *kcp.UDPSession, packetReceiver ...PacketReceiver) Socket {
 	s := &kcpSocket{}
 	s.init(conn, packetReceiver...)

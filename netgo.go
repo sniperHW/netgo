@@ -18,12 +18,16 @@ type ReadAble interface {
 	SetReadDeadline(time.Time) error
 }
 
-//recv a completely packet from ReadAble
+type BuffersSender interface {
+	SendBuffers(net.Buffers, ...time.Time) (int64, error)
+}
+
+// recv a completely packet from ReadAble
 type PacketReceiver interface {
 	Recv(ReadAble, time.Time) ([]byte, error)
 }
 
-//interface for stream oriented socket
+// interface for stream oriented socket
 type Socket interface {
 
 	//request send buff,if send block,wait unitl deadline
@@ -56,7 +60,7 @@ type userdata struct {
 type defaultPacketReceiver struct {
 }
 
-//default PacketReceiver,all data from each read is returned as a packet
+// default PacketReceiver,all data from each read is returned as a packet
 func (dr *defaultPacketReceiver) Recv(r ReadAble, deadline time.Time) ([]byte, error) {
 	var (
 		n   int

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"github.com/sniperHW/netgo/poolbuff"
+	//"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -33,7 +34,10 @@ var MaxSendBlockSize int = 65535
 
 type ObjCodec interface {
 	Decode([]byte) (interface{}, error)
-	Encode([]byte, interface{}) []byte
+	//返回对象序列化后的[]byte
+	EncodeToBuffs(net.Buffers, interface{}) (net.Buffers, int)
+	//将对象序列化后的[]byte添加到第一个参数的尾部并返回
+	EncodeToBuff([]byte, interface{}) []byte
 }
 
 type AsynSocketOption struct {
@@ -49,11 +53,19 @@ type AsynSocketOption struct {
 type defaultCodec struct {
 }
 
-func (codec *defaultCodec) Encode(buff []byte, o interface{}) []byte {
+func (codec *defaultCodec) EncodeToBuff(buff []byte, o interface{}) []byte {
 	if b, ok := o.([]byte); ok {
 		return append(buff, b...)
 	} else {
 		return buff
+	}
+}
+
+func (codec *defaultCodec) EncodeToBuffs(buffs net.Buffers, o interface{}) (net.Buffers, int) {
+	if b, ok := o.([]byte); ok {
+		return append(buffs, b), len(b)
+	} else {
+		return buffs, 0
 	}
 }
 
@@ -63,13 +75,15 @@ func (codec *defaultCodec) Decode(buff []byte) (interface{}, error) {
 	return packet, nil
 }
 
-//每发送一个对象，都将产生一次Send系统调用，对于大量小对象的情况将严重影响效率
+// 对于没有实现BuffersSender接口的Socket类型（kcpSocket和webSocket）
 //
-//更合理做法是提供一个缓冲区，将待发送对象pack到缓冲区中，当缓冲区累积到一定数量
+// 每发送一个对象，都将产生一次Send系统调用，对于大量小对象的情况将严重影响效率
 //
-//或后面没有待发送对象，再一次情况将整个缓冲区交给Send
+// 更合理做法是提供一个缓冲区，将待发送对象pack到缓冲区中，当缓冲区累积到一定数量
 //
-//OutputBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现OutputBuffer
+// 或后面没有待发送对象，再一次情况将整个缓冲区交给Send
+//
+// OutputBuffer是这种缓冲区的一个接口抽象，可根据具体需要实现OutputBuffer
 type OutputBuffer interface {
 	//pack用的缓冲区
 	GetBuffer() []byte
@@ -88,7 +102,7 @@ type OutputBuffer interface {
 	ResetBuffer()
 }
 
-//asynchronize encapsulation for Socket
+// asynchronize encapsulation for Socket
 type AsynSocket struct {
 	socket           Socket
 	codec            ObjCodec
@@ -307,7 +321,25 @@ func (s *AsynSocket) send(buff []byte) error {
 	if s.asyncSendTimeout > 0 {
 		deadline = time.Now().Add(s.asyncSendTimeout)
 	}
+
 	if _, err := s.socket.Send(buff, deadline); nil != err {
+		if IsNetTimeoutError(err) {
+			err = ErrAsynSendTimeout
+		}
+		return err
+	} else {
+		return nil
+	}
+}
+
+func (s *AsynSocket) sendBuffs(buffs net.Buffers) error {
+	//log.Println("sendBuffs", len(buffs))
+	deadline := time.Time{}
+	if s.asyncSendTimeout > 0 {
+		deadline = time.Now().Add(s.asyncSendTimeout)
+	}
+	buffersSender := s.socket.(BuffersSender)
+	if _, err := buffersSender.SendBuffers(buffs, deadline); nil != err {
 		if IsNetTimeoutError(err) {
 			err = ErrAsynSendTimeout
 		}
@@ -320,41 +352,84 @@ func (s *AsynSocket) send(buff []byte) error {
 func (s *AsynSocket) sendloop() {
 	atomic.AddInt32(&s.routineCount, 1)
 	go func() {
-		var err error
+		var (
+			err error
+		)
 		defer func() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
 				s.doClose()
 			}
 			s.outputBuffer.Clear()
 		}()
-		for {
-			select {
-			case <-s.die:
-				for len(s.sendReq) > 0 {
-					o := <-s.sendReq
-					buff := s.outputBuffer.OnUpdate(s.codec.Encode(s.outputBuffer.GetBuffer(), o))
-					if len(buff) >= MaxSendBlockSize {
-						if s.send(buff) != nil {
-							return
-						} else {
-							s.outputBuffer.ResetBuffer()
+
+		if _, ok := s.socket.(BuffersSender); ok {
+			maxBuffSize := 1024
+			total := 0
+			n := 0
+			buffs := net.Buffers{}
+			for {
+				select {
+				case <-s.die:
+					for len(s.sendReq) > 0 {
+						o := <-s.sendReq
+						buffs, n = s.codec.EncodeToBuffs(buffs, o)
+						total += n
+						if total >= MaxSendBlockSize || len(buffs) >= maxBuffSize {
+							if s.sendBuffs(buffs) != nil {
+								return
+							} else {
+								buffs = buffs[:0]
+								total = 0
+							}
 						}
 					}
-				}
 
-				if buff := s.outputBuffer.GetBuffer(); len(buff) > 0 {
-					s.send(buff)
-				}
-				return
-			case o := <-s.sendReq:
-				buff := s.outputBuffer.OnUpdate(s.codec.Encode(s.outputBuffer.GetBuffer(), o))
-				l := len(buff)
-				if l >= MaxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
-					if err = s.send(buff); nil != err {
-						s.Close(err)
-						return
+					if total > 0 {
+						s.sendBuffs(buffs)
 					}
-					s.outputBuffer.ReleaseBuffer()
+					return
+				case o := <-s.sendReq:
+					buffs, n = s.codec.EncodeToBuffs(buffs, o)
+					total += n
+					if (total >= MaxSendBlockSize || len(buffs) >= maxBuffSize) || (total > 0 && len(s.sendReq) == 0) {
+						if err = s.sendBuffs(buffs); nil != err {
+							s.Close(err)
+							return
+						}
+						buffs = net.Buffers{}
+						total = 0
+					}
+				}
+			}
+		} else {
+			for {
+				select {
+				case <-s.die:
+					for len(s.sendReq) > 0 {
+						o := <-s.sendReq
+						buff := s.outputBuffer.OnUpdate(s.codec.EncodeToBuff(s.outputBuffer.GetBuffer(), o))
+						if len(buff) >= MaxSendBlockSize {
+							if s.send(buff) != nil {
+								return
+							} else {
+								s.outputBuffer.ResetBuffer()
+							}
+						}
+					}
+					if buff := s.outputBuffer.GetBuffer(); len(buff) > 0 {
+						s.send(buff)
+					}
+					return
+				case o := <-s.sendReq:
+					buff := s.outputBuffer.OnUpdate(s.codec.EncodeToBuff(s.outputBuffer.GetBuffer(), o))
+					l := len(buff)
+					if l >= MaxSendBlockSize || (l > 0 && len(s.sendReq) == 0) {
+						if err = s.send(buff); nil != err {
+							s.Close(err)
+							return
+						}
+						s.outputBuffer.ReleaseBuffer()
+					}
 				}
 			}
 		}
@@ -373,9 +448,9 @@ func (s *AsynSocket) getTimeout(deadline []time.Time) time.Duration {
 	}
 }
 
-//deadline: 如果不传递，当发送chan满一直等待
-//deadline.IsZero() || deadline.Before(time.Now):当chan满立即返回ErrSendBusy
-//否则当发送chan满等待到deadline,返回ErrSendTimeout
+// deadline: 如果不传递，当发送chan满一直等待
+// deadline.IsZero() || deadline.Before(time.Now):当chan满立即返回ErrSendBusy
+// 否则当发送chan满等待到deadline,返回ErrSendTimeout
 func (s *AsynSocket) Send(o interface{}, deadline ...time.Time) error {
 	s.sendOnce.Do(s.sendloop)
 	if timeout := s.getTimeout(deadline); timeout == 0 {
