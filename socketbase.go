@@ -2,7 +2,6 @@ package netgo
 
 import (
 	"net"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -23,10 +22,6 @@ func (base *socketBase) init(conn net.Conn, packetReceiver ...PacketReceiver) {
 	} else {
 		base.packetReceiver = packetReceiver[0]
 	}
-
-	runtime.SetFinalizer(base, func(base *socketBase) {
-		base.Close()
-	})
 }
 
 func (base *socketBase) GetUnderConn() interface{} {
@@ -35,7 +30,6 @@ func (base *socketBase) GetUnderConn() interface{} {
 
 func (base *socketBase) Close() {
 	base.closeOnce.Do(func() {
-		runtime.SetFinalizer(base, nil)
 		base.conn.Close()
 	})
 }

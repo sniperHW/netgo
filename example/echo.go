@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"github.com/sniperHW/netgo"
-	"github.com/sniperHW/netgo/example/pb"
-	"google.golang.org/protobuf/proto"
 	"log"
 	"net"
 	"sync/atomic"
 	"time"
+
+	"github.com/sniperHW/netgo"
+	"github.com/sniperHW/netgo/example/pb"
+	"google.golang.org/protobuf/proto"
 )
 
 type PBCodec struct {
@@ -55,7 +56,7 @@ func (codec *PBCodec) Recv(readable netgo.ReadAble, deadline time.Time) (pkt []b
 	for {
 		rr := codec.r
 		pktLen := 0
-		if (codec.w-rr) >= lenHead && uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
+		if (codec.w - rr) >= lenHead { //&& uint32(codec.w-rr-lenHead) >= binary.BigEndian.Uint32(codec.buff[rr:]) {
 			pktLen = int(binary.BigEndian.Uint32(codec.buff[rr:]))
 			rr += lenHead
 		}

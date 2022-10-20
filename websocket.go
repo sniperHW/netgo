@@ -1,12 +1,12 @@
 package netgo
 
 import (
-	gorilla "github.com/gorilla/websocket"
 	"net"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	gorilla "github.com/gorilla/websocket"
 )
 
 type webSocketReadable struct {
@@ -79,7 +79,6 @@ func (wc *webSocket) GetUnderConn() interface{} {
 
 func (wc *webSocket) Close() {
 	wc.closeOnce.Do(func() {
-		runtime.SetFinalizer(wc, nil)
 		wc.conn.SetWriteDeadline(time.Now().Add(time.Second))
 		wc.conn.WriteMessage(gorilla.CloseMessage, gorilla.FormatCloseMessage(gorilla.CloseNormalClosure, ""))
 		wc.conn.Close()
@@ -134,10 +133,6 @@ func NewWebSocket(conn *gorilla.Conn, packetReceiver ...PacketReceiver) Socket {
 			conn: conn,
 		}
 	}
-
-	runtime.SetFinalizer(s, func(s *webSocket) {
-		s.Close()
-	})
 
 	return s
 }
