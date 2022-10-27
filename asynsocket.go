@@ -3,11 +3,12 @@ package netgo
 import (
 	"context"
 	"errors"
-	"github.com/sniperHW/netgo/poolbuff"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/sniperHW/netgo/poolbuff"
 )
 
 type errTimeout struct {

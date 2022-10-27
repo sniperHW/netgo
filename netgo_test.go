@@ -6,16 +6,19 @@ import (
 	"context"
 	"crypto/sha1"
 	"errors"
-	gorilla "github.com/gorilla/websocket"
-	"github.com/xtaci/kcp-go/v5"
-	"golang.org/x/crypto/pbkdf2"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	gorilla "github.com/gorilla/websocket"
+	"github.com/xtaci/kcp-go/v5"
+	"github.com/xtaci/smux"
+	"golang.org/x/crypto/pbkdf2"
 )
 
 func TestKcpSocket(t *testing.T) {
@@ -290,12 +293,9 @@ func TestAsynSocket(t *testing.T) {
 				log.Println("TestAsynSocket: server closed err:", err)
 			}).SetPacketHandler(func(ctx context.Context, as *AsynSocket, packet interface{}) error {
 				go func() {
-					select {
-					case <-ctx.Done():
-						log.Println("context Done error:", ctx.Err())
-						close(c)
-						return
-					}
+					<-ctx.Done()
+					log.Println("context Done error:", ctx.Err())
+					close(c)
 				}()
 				return nil
 			}).Recv(time.Now().Add(time.Second))
@@ -391,7 +391,7 @@ func TestAsynSocket2(t *testing.T) {
 			log.Println("TestAsynSocket:client closed err:", err)
 		}).SetPacketHandler(func(_ context.Context, as *AsynSocket, packet interface{}) error {
 			total += len(packet.([]byte))
-			log.Println(total)
+			//log.Println(total)
 			if total >= 1024*10000 {
 				close(okChan)
 				return errors.New("active close")
@@ -409,10 +409,95 @@ func TestAsynSocket2(t *testing.T) {
 
 		<-okChan
 
-		log.Println("use", time.Now().Sub(beg))
+		log.Println("use", time.Since(beg))
 
 		as.Close(nil)
 	}
+
+	listener.Close()
+
+}
+
+func TestStream(t *testing.T) {
+
+	listenStream := func(session *smux.Session, onNewStream func(*smux.Stream)) (func() error, error) {
+		return func() error {
+			for {
+				if s, err := session.AcceptStream(); err == nil {
+					onNewStream(s)
+				} else {
+					return err
+				}
+			}
+		}, nil
+	}
+
+	var sessions sync.Map
+
+	listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		if server, err := smux.Server(conn, nil); err == nil {
+			sessions.Store(server, struct{}{})
+			serve, _ := listenStream(server, func(s *smux.Stream) {
+				ss := NewStream(s)
+				go func() {
+					for {
+						packet, err := ss.Recv(time.Now().Add(time.Second))
+						if nil != err {
+							log.Println("TestStream:server recv err:", err)
+							break
+						}
+						log.Println("recv from stream", s.ID())
+						ss.Send(packet)
+					}
+					s.Close()
+				}()
+			})
+			go func() {
+				serve()
+				sessions.Delete(server)
+			}()
+		} else {
+			panic(err)
+		}
+	})
+
+	go serve()
+
+	dialer := &net.Dialer{}
+	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	if streamCli, err := smux.Client(conn, nil); err != nil {
+		panic(err)
+	} else {
+		{
+			s, err := streamCli.OpenStream()
+			if err != nil {
+				panic(err)
+			}
+			ss := NewStream(s)
+			ss.Send([]byte("hello"))
+			packet, err := ss.Recv()
+			log.Println("TestTCPSocket:client", string(packet), err)
+			ss.Close()
+		}
+
+		{
+			s, err := streamCli.OpenStream()
+			if err != nil {
+				panic(err)
+			}
+			ss := NewStream(s)
+			ss.Send([]byte("hello"))
+			packet, err := ss.Recv()
+			log.Println("TestTCPSocket:client", string(packet), err)
+			ss.Close()
+		}
+
+	}
+
+	sessions.Range(func(key, value interface{}) bool {
+		key.(*smux.Session).Close()
+		return true
+	})
 
 	listener.Close()
 
