@@ -176,11 +176,15 @@ func (s *AsynSocket) GetUnderConn() interface{} {
 }
 
 func (s *AsynSocket) doClose() {
+	once := false
 	s.doCloseOnce.Do(func() {
+		once = true
+	})
+	if once {
 		s.socket.Close()
 		reason, _ := s.closeReason.Load().(error)
 		s.closeCallBack.Load().(func(*AsynSocket, error))(s, reason)
-	})
+	}
 }
 
 func (s *AsynSocket) Close(err error) {
