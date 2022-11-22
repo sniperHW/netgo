@@ -50,7 +50,7 @@ func (base *socketBase) SetUserData(ud interface{}) {
 
 func (base *socketBase) GetUserData() interface{} {
 	if ud, ok := base.userData.Load().(userdata); ok {
-		return ud
+		return ud.data
 	} else {
 		return nil
 	}

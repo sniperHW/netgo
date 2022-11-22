@@ -67,7 +67,7 @@ func (wc *webSocket) SetUserData(ud interface{}) {
 
 func (wc *webSocket) GetUserData() interface{} {
 	if ud, ok := wc.userData.Load().(userdata); ok {
-		return ud
+		return ud.data
 	} else {
 		return nil
 	}
