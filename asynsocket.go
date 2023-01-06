@@ -72,6 +72,7 @@ type AsynSocket struct {
 	sendReq          chan interface{}
 	recvOnce         sync.Once
 	sendOnce         sync.Once
+	sendRoutineFlag  int32
 	routineCount     int32
 	closeOnce        sync.Once
 	closeReason      atomic.Value
@@ -196,6 +197,10 @@ func (s *AsynSocket) Close(err error) {
 		close(s.die)
 		if atomic.AddInt32(&s.routineCount, -1) == 0 {
 			go s.doClose()
+		} else if atomic.LoadInt32(&s.sendRoutineFlag) == 0 {
+			//暂时无发送请求
+			//此时,recvloop可能阻塞在s.socket.Recv(deadline),close socket让调用返回错误
+			s.socket.Close()
 		}
 	})
 }
@@ -302,6 +307,7 @@ func (s *AsynSocket) sendBuffs(buffs net.Buffers) (err error) {
 
 func (s *AsynSocket) sendloop() {
 	atomic.AddInt32(&s.routineCount, 1)
+	atomic.StoreInt32(&s.sendRoutineFlag, 1)
 	go func() {
 		var (
 			err error
@@ -309,6 +315,9 @@ func (s *AsynSocket) sendloop() {
 		defer func() {
 			if atomic.AddInt32(&s.routineCount, -1) == 0 {
 				s.doClose()
+			} else {
+				//recvloop可能阻塞在s.socket.Recv(deadline),close socket让调用返回错误
+				s.socket.Close()
 			}
 		}()
 
