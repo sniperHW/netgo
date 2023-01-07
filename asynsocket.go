@@ -63,6 +63,38 @@ func (codec *defaultCodec) Decode(buff []byte) (interface{}, error) {
 	return packet, nil
 }
 
+type wrCounter struct {
+	sync.Mutex
+	w int
+	r int
+}
+
+func (c *wrCounter) addW(v int) (w int, r int) {
+	c.Lock()
+	c.w += v
+	w = c.w
+	r = c.r
+	c.Unlock()
+	return w, r
+}
+
+func (c *wrCounter) addR(v int) (w int, r int) {
+	c.Lock()
+	c.r += v
+	w = c.w
+	r = c.r
+	c.Unlock()
+	return w, r
+}
+
+func (c *wrCounter) getWR() (w int, r int) {
+	c.Lock()
+	w = c.w
+	r = c.r
+	c.Unlock()
+	return w, r
+}
+
 // asynchronize encapsulation for Socket
 type AsynSocket struct {
 	socket           Socket
@@ -70,14 +102,13 @@ type AsynSocket struct {
 	die              chan struct{}
 	recvReq          chan time.Time
 	sendReq          chan interface{}
-	recvOnce         sync.Once
 	sendOnce         sync.Once
-	sendRoutineFlag  int32
-	routineCount     int32
+	recvOnce         sync.Once
+	wrCounter        wrCounter
 	closeOnce        sync.Once
 	closeReason      atomic.Value
 	doCloseOnce      sync.Once
-	closeCallBack    atomic.Value //func(*AsynSocket, error) //call when routineCount trun to zero
+	closeCallBack    atomic.Value //func(*AsynSocket, error),call when wrCounter.w == 0 && wrCounter.r == 0
 	handlePakcet     atomic.Value //func(context.Context, *AsynSocket, interface{}) error
 	onRecvTimeout    atomic.Value //func(*AsynSocket)
 	asyncSendTimeout time.Duration
@@ -117,7 +148,7 @@ func NewAsynSocket(socket Socket, option AsynSocketOption) *AsynSocket {
 	})
 
 	s.onRecvTimeout.Store(func(*AsynSocket) {
-		s.Close(ErrRecvTimeout)
+		s.close(ErrRecvTimeout, false)
 	})
 
 	s.handlePakcet.Store(func(context.Context, *AsynSocket, interface{}) error {
@@ -188,19 +219,33 @@ func (s *AsynSocket) doClose() {
 	}
 }
 
-func (s *AsynSocket) Close(err error) {
+func (s *AsynSocket) close(err error, closeBySendRoutine bool) {
 	s.closeOnce.Do(func() {
-		atomic.AddInt32(&s.routineCount, 1) //add 1,to prevent recvloop and sendloop call closeCallBack
 		if nil != err {
 			s.closeReason.Store(err)
 		}
 		close(s.die)
-		if atomic.AddInt32(&s.routineCount, -1) == 0 {
-			go s.doClose()
-		} else if atomic.LoadInt32(&s.sendRoutineFlag) == 0 {
-			//暂时无发送请求
-			//此时,recvloop可能阻塞在s.socket.Recv(deadline),close socket让调用返回错误
+		if closeBySendRoutine {
 			s.socket.Close()
+		}
+	})
+}
+
+func (s *AsynSocket) Close(err error) {
+	s.closeOnce.Do(func() {
+		if nil != err {
+			s.closeReason.Store(err)
+		}
+		close(s.die)
+		w, r := s.wrCounter.getWR()
+		if w == 0 {
+			if r == 0 {
+				//读写routine均未启动,直接doClose
+				go s.doClose()
+			} else {
+				//写routine尚未启动，读routine可能阻塞在s.socket.Recv(deadline),调用Close以解除可能的阻塞
+				s.socket.Close()
+			}
 		}
 	})
 }
@@ -227,11 +272,12 @@ func (s *AsynSocket) Recv(deadline ...time.Time) *AsynSocket {
 }
 
 func (s *AsynSocket) recvloop() {
-	atomic.AddInt32(&s.routineCount, 1)
+	s.wrCounter.addR(1)
 	packetHandler := s.handlePakcet.Load().(func(context.Context, *AsynSocket, interface{}) error)
 	go func() {
 		defer func() {
-			if atomic.AddInt32(&s.routineCount, -1) == 0 {
+			w, _ := s.wrCounter.addR(-1)
+			if w == 0 {
 				s.doClose()
 			}
 		}()
@@ -256,14 +302,14 @@ func (s *AsynSocket) recvloop() {
 					}
 					if nil == err {
 						if err = packetHandler(s.context, s, packet); err != nil {
-							s.Close(err)
+							s.close(err, false)
 							return
 						}
 					} else {
 						if IsNetTimeoutError(err) {
 							s.onRecvTimeout.Load().(func(*AsynSocket))(s)
 						} else {
-							s.Close(err)
+							s.close(err, false)
 							return
 						}
 					}
@@ -306,14 +352,14 @@ func (s *AsynSocket) sendBuffs(buffs net.Buffers) (err error) {
 }
 
 func (s *AsynSocket) sendloop() {
-	atomic.AddInt32(&s.routineCount, 1)
-	atomic.StoreInt32(&s.sendRoutineFlag, 1)
+	s.wrCounter.addW(1)
 	go func() {
 		var (
 			err error
 		)
 		defer func() {
-			if atomic.AddInt32(&s.routineCount, -1) == 0 {
+			_, r := s.wrCounter.addW(-1)
+			if r == 0 {
 				s.doClose()
 			} else {
 				//recvloop可能阻塞在s.socket.Recv(deadline),close socket让调用返回错误
@@ -351,7 +397,7 @@ func (s *AsynSocket) sendloop() {
 				total += n
 				if (total >= MaxSendBlockSize || len(buffs) >= maxBuffSize) || (total > 0 && len(s.sendReq) == 0) {
 					if err = s.sendBuffs(buffs); nil != err {
-						s.Close(err)
+						s.close(err, true)
 						return
 					}
 					buffs = net.Buffers{}
@@ -367,7 +413,7 @@ func (s *AsynSocket) getTimeout(deadline []time.Time) time.Duration {
 		if deadline[0].IsZero() {
 			return -1
 		} else {
-			return deadline[0].Sub(time.Now())
+			return time.Until(deadline[0])
 		}
 	} else {
 		return 0
