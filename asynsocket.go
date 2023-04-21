@@ -314,10 +314,13 @@ func (s *AsynSocket) recvloop() {
 						}
 					}
 					if s.autoRecv {
+						var readdeadline time.Time
 						if s.autoRecvTimeout > 0 {
-							s.Recv(time.Now().Add(s.autoRecvTimeout))
-						} else {
-							s.Recv()
+							readdeadline = time.Now().Add(s.autoRecvTimeout)
+						}
+						select {
+						case s.recvReq <- readdeadline:
+						default:
 						}
 					}
 				}

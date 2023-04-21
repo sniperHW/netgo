@@ -30,7 +30,7 @@ func TestKcpSocket(t *testing.T) {
 		err      error
 	)
 
-	if listener, err = kcp.ListenWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
+	if listener, err = kcp.ListenWithOptions("localhost:8110", block, 10, 3); err == nil {
 		go func() {
 			for {
 				conn, err := listener.AcceptKCP()
@@ -63,7 +63,7 @@ func TestKcpSocket(t *testing.T) {
 		key := pbkdf2.Key([]byte("demo pass"), []byte("demo salt"), 1024, 32, sha1.New)
 		block, _ := kcp.NewAESBlockCrypt(key)
 		// dial to the echo server
-		if conn, err := kcp.DialWithOptions("127.0.0.1:12345", block, 10, 3); err == nil {
+		if conn, err := kcp.DialWithOptions("localhost:8110", block, 10, 3); err == nil {
 			s := NewKcpSocket(conn)
 
 			s.Send([]byte("hello"))
@@ -84,7 +84,7 @@ func TestKcpSocket(t *testing.T) {
 func TestWebSocket(t *testing.T) {
 	{
 
-		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:8110")
+		tcpAddr, _ := net.ResolveTCPAddr("tcp", "localhost:18110")
 
 		listener, _ := net.ListenTCP("tcp", tcpAddr)
 
@@ -124,7 +124,7 @@ func TestWebSocket(t *testing.T) {
 
 		{
 
-			u := url.URL{Scheme: "ws", Host: "localhost:8110", Path: "/echo"}
+			u := url.URL{Scheme: "ws", Host: "localhost:18110", Path: "/echo"}
 			dialer := gorilla.DefaultDialer
 
 			conn, _, _ := dialer.Dial(u.String(), nil)
@@ -151,7 +151,7 @@ func TestWebSocket(t *testing.T) {
 		}
 
 		{
-			u := url.URL{Scheme: "ws", Host: "localhost:8110", Path: "/echo"}
+			u := url.URL{Scheme: "ws", Host: "localhost:18110", Path: "/echo"}
 			dialer := gorilla.DefaultDialer
 
 			conn, _, _ := dialer.Dial(u.String(), nil)
@@ -175,7 +175,7 @@ func TestWebSocket(t *testing.T) {
 func TestAsynSocket(t *testing.T) {
 	MaxSendBlockSize = 64
 	{
-		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 			log.Println("TestAsynSocket: on client")
 			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{
 				AutoRecv:        true,
@@ -199,7 +199,7 @@ func TestAsynSocket(t *testing.T) {
 		dialer := &net.Dialer{}
 
 		{
-			conn, _ := dialer.Dial("tcp", "localhost:8110")
+			conn, _ := dialer.Dial("tcp", "localhost:18110")
 			okChan := make(chan struct{})
 
 			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
@@ -217,7 +217,7 @@ func TestAsynSocket(t *testing.T) {
 		log.Println("TestAsynSocket:-----------------------------")
 
 		{
-			conn, _ := dialer.Dial("tcp", "localhost:8110")
+			conn, _ := dialer.Dial("tcp", "localhost:18110")
 			okChan := make(chan struct{})
 			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 				log.Println("TestAsynSocket:client closed err:", err)
@@ -236,7 +236,7 @@ func TestAsynSocket(t *testing.T) {
 
 		okChan := make(chan struct{})
 
-		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 			log.Println("TestAsynSocket:on client")
 			i := 0
 			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
@@ -258,7 +258,7 @@ func TestAsynSocket(t *testing.T) {
 		dialer := &net.Dialer{}
 
 		{
-			conn, _ := dialer.Dial("tcp", "localhost:8110")
+			conn, _ := dialer.Dial("tcp", "localhost:18110")
 			as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
 				SendChanSize: 1000,
 			}).SetCloseCallback(func(_ *AsynSocket, err error) {
@@ -281,7 +281,7 @@ func TestAsynSocket(t *testing.T) {
 	{
 		c := make(chan struct{})
 
-		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 			log.Println("TestAsynSocket: on client")
 			ctx, cancel := context.WithCancel(context.Background())
 			NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{
@@ -307,7 +307,7 @@ func TestAsynSocket(t *testing.T) {
 
 		dialer := &net.Dialer{}
 
-		conn, _ := dialer.Dial("tcp", "localhost:8110")
+		conn, _ := dialer.Dial("tcp", "localhost:18110")
 
 		as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{})
 		as.Send([]byte("hello"), time.Now().Add(time.Second))
@@ -320,7 +320,7 @@ func TestAsynSocket(t *testing.T) {
 func TestTCPSocket(t *testing.T) {
 
 	{
-		listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+		listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 			log.Println("TestTCPSocket:on client")
 			s := NewTcpSocket(conn)
 			go func() {
@@ -341,7 +341,7 @@ func TestTCPSocket(t *testing.T) {
 		dialer := &net.Dialer{}
 
 		{
-			conn, _ := dialer.Dial("tcp", "localhost:8110")
+			conn, _ := dialer.Dial("tcp", "localhost:18110")
 			s := NewTcpSocket(conn.(*net.TCPConn))
 			s.Send([]byte("hello"))
 			packet, err := s.Recv()
@@ -350,7 +350,7 @@ func TestTCPSocket(t *testing.T) {
 		}
 
 		{
-			conn, _ := dialer.Dial("tcp", "localhost:8110")
+			conn, _ := dialer.Dial("tcp", "localhost:18110")
 			s := NewTcpSocket(conn.(*net.TCPConn))
 			packet, err := s.Recv()
 			log.Println("TestTCPSocket:client", string(packet), err)
@@ -364,7 +364,7 @@ func TestTCPSocket(t *testing.T) {
 
 func TestAsynSocket2(t *testing.T) {
 
-	listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+	listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 		log.Println("TestAsynSocket:on client")
 		NewAsynSocket(NewTcpSocket(conn), AsynSocketOption{}).SetCloseCallback(func(_ *AsynSocket, err error) {
 			log.Println("TestAsynSocket:server closed err:", err)
@@ -384,7 +384,7 @@ func TestAsynSocket2(t *testing.T) {
 		okChan := make(chan struct{})
 		total := 0
 		msg := []byte(strings.Repeat("a", 1024))
-		conn, _ := dialer.Dial("tcp", "localhost:8110")
+		conn, _ := dialer.Dial("tcp", "localhost:18110")
 		as := NewAsynSocket(NewTcpSocket(conn.(*net.TCPConn)), AsynSocketOption{
 			SendChanSize: 1000,
 		}).SetCloseCallback(func(_ *AsynSocket, err error) {
@@ -434,7 +434,7 @@ func TestStream(t *testing.T) {
 
 	var sessions sync.Map
 
-	listener, serve, _ := ListenTCP("tcp", "localhost:8110", func(conn *net.TCPConn) {
+	listener, serve, _ := ListenTCP("tcp", "localhost:18110", func(conn *net.TCPConn) {
 		if server, err := smux.Server(conn, nil); err == nil {
 			sessions.Store(server, struct{}{})
 			serve, _ := listenStream(server, func(s *smux.Stream) {
@@ -464,7 +464,7 @@ func TestStream(t *testing.T) {
 	go serve()
 
 	dialer := &net.Dialer{}
-	conn, _ := dialer.Dial("tcp", "localhost:8110")
+	conn, _ := dialer.Dial("tcp", "localhost:18110")
 	if streamCli, err := smux.Client(conn, nil); err != nil {
 		panic(err)
 	} else {
