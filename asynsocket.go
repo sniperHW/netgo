@@ -373,7 +373,7 @@ func (s *AsynSocket) sendloop() {
 		maxBuffSize := 1024
 		total := 0
 		n := 0
-		buffs := net.Buffers{}
+		buffs := make(net.Buffers, 0, 8)
 		for {
 			select {
 			case <-s.die:
@@ -403,7 +403,14 @@ func (s *AsynSocket) sendloop() {
 						s.close(err, true)
 						return
 					}
-					buffs = net.Buffers{}
+					if cap(buffs) < 64 {
+						for i := 0; i < len(buffs); i++ {
+							buffs[i] = nil
+						}
+						buffs = buffs[:0]
+					} else {
+						buffs = make(net.Buffers, 0, 8)
+					}
 					total = 0
 				}
 			}
