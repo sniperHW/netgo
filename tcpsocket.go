@@ -43,11 +43,7 @@ func ListenTCP(nettype string, service string, onNewclient func(*net.TCPConn)) (
 		for {
 			conn, e := listener.Accept()
 			if e != nil {
-				if ne, ok := e.(net.Error); ok && ne.Temporary() {
-					continue
-				} else {
-					return
-				}
+				return
 			} else {
 				onNewclient(conn.(*net.TCPConn))
 			}
