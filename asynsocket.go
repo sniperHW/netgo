@@ -11,23 +11,11 @@ import (
 	"github.com/sniperHW/netgo/poolbuff"
 )
 
-type errTimeout struct {
-	error
-}
-
-func (e *errTimeout) Timeout() bool {
-	return true
-}
-
-func (e *errTimeout) Temporary() bool {
-	return false
-}
-
 var (
-	ErrRecvTimeout            error = &errTimeout{error: errors.New("recvTimeout")}
-	ErrPushToSendQueueTimeout error = &errTimeout{error: errors.New("pushToSendQueueTimeout")}
-	ErrSendQueueFull          error = &errTimeout{error: errors.New("sendQueueFull")}
-	ErrAsynSendTimeout        error = &errTimeout{error: errors.New("asynSendTimeout")}
+	ErrRecvTimeout            error = errors.New("recvTimeout")
+	ErrPushToSendQueueTimeout error = errors.New("pushToSendQueueTimeout")
+	ErrSendQueueFull          error = errors.New("sendQueueFull")
+	ErrAsynSendTimeout        error = errors.New("asynSendTimeout")
 	ErrSocketClosed           error = errors.New("socketClosed")
 )
 
