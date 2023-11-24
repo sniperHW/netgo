@@ -24,10 +24,11 @@ func (e *errTimeout) Temporary() bool {
 }
 
 var (
-	ErrRecvTimeout     error = &errTimeout{error: errors.New("RecvTimeout")}
-	ErrSendTimeout     error = &errTimeout{error: errors.New("SendTimeout")}
-	ErrAsynSendTimeout error = &errTimeout{error: errors.New("ErrAsynSendTimeout")}
-	ErrSocketClosed    error = errors.New("SocketClosed")
+	ErrRecvTimeout            error = &errTimeout{error: errors.New("recvTimeout")}
+	ErrPushToSendQueueTimeout error = &errTimeout{error: errors.New("pushToSendQueueTimeout")}
+	ErrSendQueueFull          error = &errTimeout{error: errors.New("sendQueueFull")}
+	ErrAsynSendTimeout        error = &errTimeout{error: errors.New("asynSendTimeout")}
+	ErrSocketClosed           error = errors.New("socketClosed")
 )
 
 var MaxSendBlockSize int = 65535
@@ -432,7 +433,7 @@ func (s *AsynSocket) getTimeout(deadline []time.Time) time.Duration {
 
 // deadline: 如果不传递，当发送chan满一直等待
 // deadline.IsZero() || deadline.Before(time.Now):当chan满立即返回ErrSendBusy
-// 否则当发送chan满等待到deadline,返回ErrSendTimeout
+// 否则当发送chan满等待到deadline,返回ErrPushToSendQueueTimeout
 func (s *AsynSocket) Send(o interface{}, deadline ...time.Time) error {
 	s.sendOnce.Do(s.sendloop)
 	if timeout := s.getTimeout(deadline); timeout == 0 {
@@ -451,7 +452,7 @@ func (s *AsynSocket) Send(o interface{}, deadline ...time.Time) error {
 		case <-s.die:
 			return ErrSocketClosed
 		case <-ticker.C:
-			return ErrSendTimeout
+			return ErrPushToSendQueueTimeout
 		case s.sendReq <- o:
 			return nil
 		}
@@ -463,7 +464,7 @@ func (s *AsynSocket) Send(o interface{}, deadline ...time.Time) error {
 		case s.sendReq <- o:
 			return nil
 		default:
-			return ErrSendTimeout
+			return ErrSendQueueFull
 		}
 	}
 }
