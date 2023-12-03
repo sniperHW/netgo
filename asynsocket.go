@@ -294,14 +294,13 @@ func (s *AsynSocket) recvloop() {
 							s.close(err, false)
 							return
 						}
+					} else if IsNetTimeoutError(err) {
+						s.onRecvTimeout.Load().(func(*AsynSocket))(s)
 					} else {
-						if IsNetTimeoutError(err) {
-							s.onRecvTimeout.Load().(func(*AsynSocket))(s)
-						} else {
-							s.close(err, false)
-							return
-						}
+						s.close(err, false)
+						return
 					}
+
 					if s.autoRecv {
 						var readdeadline time.Time
 						if s.autoRecvTimeout > 0 {
@@ -335,11 +334,10 @@ func (s *AsynSocket) sendBuffs(buffs net.Buffers) (err error) {
 		_, err = s.socket.Send(outputBuffer, deadline)
 	}
 
-	if nil != err {
-		if IsNetTimeoutError(err) {
-			err = ErrAsynSendTimeout
-		}
+	if nil != err && IsNetTimeoutError(err) {
+		err = ErrAsynSendTimeout
 	}
+
 	return err
 }
 
