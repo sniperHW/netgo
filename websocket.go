@@ -20,27 +20,21 @@ type webSocket struct {
 
 var _ Socket = &webSocket{}
 
-func (wc *webSocket) Read(buff []byte) (int, error) {
-	if wc.reader == nil {
-		_, r, err := wc.conn.NextReader()
-		if err != nil {
-			return 0, err
+func (wc *webSocket) Read(buff []byte) (n int, err error) {
+	for {
+		if wc.reader == nil {
+			_, wc.reader, err = wc.conn.NextReader()
+			if err != nil {
+				return
+			}
 		}
-		wc.reader = r
-	}
-
-	n, err := wc.reader.Read(buff)
-	if err != nil && err != io.EOF {
-		return n, err
-	} else if err == io.EOF {
-		_, r, err := wc.conn.NextReader()
-		if err != nil {
-			return 0, err
+		n, err = wc.reader.Read(buff)
+		if err == io.EOF {
+			wc.reader = nil
+		} else {
+			return
 		}
-		wc.reader = r
 	}
-
-	return n, nil
 }
 
 func (wc *webSocket) SetReadDeadline(deadline time.Time) error {
